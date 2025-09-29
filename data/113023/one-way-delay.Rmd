@@ -1,0 +1,99 @@
+---
+title: "WebRTC Cellular 11/30 Experiment: One-way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ue_data_file: "113023-ue.csv"
+  sfu_data_file: "113023-sfu.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+pkts_ue <- read_csv(params$ue_data_file, col_types="") %>%
+  mutate(encap = as.factor(encap), rtp_ssrc = as.factor(rtp_ssrc), rtp_pt = as.factor(rtp_pt))
+
+pkts_sfu <- read_csv(params$sfu_data_file, col_types="") %>%
+  mutate(encap = as.factor(encap), rtp_ssrc = as.factor(rtp_ssrc), rtp_pt = as.factor(rtp_pt))
+
+pkts_sfu %<>%
+  filter(ts_s >= 1701379289) %>% 
+  mutate(ts_s = ts_s - 1701379289) %>% 
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  mutate(dir = as.factor(if_else(ip_src == "192.168.68.8", "tx", "rx"))) %>%
+  select(-c(gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ts_s, ts_us))
+
+pkts_ue %<>%
+  filter(ts_s >= 1701379289) %>%
+  mutate(ts_s = ts_s - 1701379289) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  mutate(dir = as.factor(if_else(ip_src == "192.168.0.20", "tx", "rx"))) %>%
+  select(-c(gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ts_s, ts_us))
+```
+
+```{r ue-seq-tx}
+pkts_ue %>%
+  filter(dir == "tx") %>%
+  mutate(ts_s = ts_ms / 1e3) %>%
+  ggplot(aes(x = ts_s, y = rtp_tw_seq3)) +
+    labs(x = "Time [s]", y = "Google CC Sequence No.") +
+    geom_line() +
+    theme_om()
+```
+
+```{r sfu-seq-rx}
+pkts_sfu %>%
+  filter(dir == "rx") %>%
+  mutate(ts_s = ts_ms / 1e3) %>%
+  ggplot(aes(x = ts_s, y = rtp_tw_seq3, color = ip_src)) +
+    labs(x = "Time [s]", y = "Google CC Sequence No.", color = "Source IP Addr.") +
+    geom_line() +
+    theme_om()
+```
+
+
+```{r}
+# left_join(pkts_ue %>% filter(dir == "tx" & ts_ms < 2000), pkts_sfu %>% filter(dir == "rx" & ts_ms < 2000),
+#           join_by("rtp_tw_seq", "rtp_seq"), suffix = c("_ue", "_sfu")) %>%
+#   filter(!is.na(rtp_tw_seq)) %>%
+#   select(rtp_tw_seq, rtp_seq, ts_ms_ue, ts_ms_sfu, rtp_pt_ue, rtp_pt_sfu)
+
+
+# %>%
+#   pivot_longer(c("ts_us_ue", "ts_us_sfu"), names_to = "var", values_to = "ts_us") %>%
+#   ggplot(aes(x = ts_us, y = rtp_tw_seq, color = var)) +
+#     geom_point()
+```
+
+
+```{r ue-packet-spacing-cdf, fig.asp = 0.95, fig.width = 3.5}
+pkts_ue %>%
+  filter(dir == "tx" & !is.na(rtp_tw_seq3)) %>%
+  select(rtp_tw_seq3, ts_ms) %>%
+  mutate(ts_ms_delta = ts_ms - lag(ts_ms)) %>%
+  ggplot(aes(x = ts_ms_delta)) +
+    labs(x = "Packet Spacing [ms]", y = "CDF") +
+    xlim(0, 40) +
+    stat_ecdf(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r sfu-packet-spacing-cdf, fig.asp = 0.95, fig.width = 3.5}
+pkts_sfu %>%
+  filter(dir == "rx" & !is.na(rtp_tw_seq3)) %>%
+  select(rtp_tw_seq3, ts_ms) %>%
+  mutate(ts_ms_delta = ts_ms - lag(ts_ms)) %>%
+  ggplot(aes(x = ts_ms_delta)) +
+    labs(x = "Packet Spacing [ms]", y = "CDF") +
+    xlim(0, 40) +
+    stat_ecdf(color = "dodgerblue4") +
+    theme_om()
+```

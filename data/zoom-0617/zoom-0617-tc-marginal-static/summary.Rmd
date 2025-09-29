@@ -1,0 +1,125 @@
+---
+title: "Zoom 06/17 - 5G, marginal channel, static - Summary"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0617-tc-marginal-static"
+  fig_path: fig/
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+
+config <- list(
+  "ssim_file"            = paste(params$experiment_name, "ssim.csv", sep = "-"),
+  "sender_pkts_file"     = paste(params$experiment_name, "sender-pkts.csv", sep = "-"),
+  "receiver_pkts_file"   = paste(params$experiment_name, "receiver-pkts.csv", sep = "-"),
+  "join_pkts_up_file"    = paste(params$experiment_name, "join-pkts-up.csv", sep = "-"),
+  "sender_frames_file"   = paste(params$experiment_name, "sender-frames.csv", sep = "-"),
+  "receiver_frames_file" = paste(params$experiment_name, "receiver-frames.csv", sep = "-"),
+  "single_color"         = "dodgerblue4"
+)
+
+```
+
+```{r import}
+ssim <- read_csv(config$ssim_file, col_types="iiin", comment="#")
+sender_pkts <- read_csv(config$sender_pkts_file, col_types = "nnfffcicifiniiniff")
+receiver_pkts <- read_csv(config$receiver_pkts_file, col_types = "nnfffcicifiniiniff")
+join_pkts_up <- read_csv(config$join_pkts_up_file, col_types = "nnfinfinifnniifnnn")
+sender_frames <- read_csv(config$sender_frames_file, col_types = "nciciiffnnnnniiiin")
+receiver_frames <- read_csv(config$receiver_frames_file, col_types = "nciciiffnnnnniiiin")
+```
+
+```{r}
+min_ts <- list(
+  "sender" = min(sender_pkts$ts_s),
+  "receiver"   = min(receiver_pkts$ts_s))
+
+sender_frames %<>%
+  mutate(
+    rel_min_ts_s = (min_ts_s - min_ts$sender) + (min_ts_us / 1e6),
+    rel_max_ts_s = (max_ts_s - min_ts$sender) + (max_ts_us / 1e6))
+
+receiver_frames %<>%
+  mutate(
+    rel_min_ts_s = (min_ts_s - min_ts$sender) + (min_ts_us / 1e6),
+    rel_max_ts_s = (max_ts_s - min_ts$sender) + (max_ts_us / 1e6))
+```
+
+*Generate consecutive sequence over sent frame indices:*
+
+```{r}
+ssim %<>%
+  mutate(it = as.integer(cumsum(if_else(frame_send - lag(frame_send, default = 0) < -100, 1, 0)))) %>%
+  mutate(frame_send_seq = as.integer(max(frame_send) * it + frame_send + if_else(it > 0, 1, 0))) %>%
+  mutate(ssim = if_else(ssim == -1, NA, ssim)) %>%
+  mutate(frame_incr = frame_send_seq - lag(frame_send_seq)) %>%
+  mutate(frame_incr = if_else(frame_incr == 0, NA, frame_incr))
+```
+
+*Structural similarity of received frames to sent frames:*
+
+```{r ssim, fig.width = 9, fig.height = 2.5}
+ssim %>%
+  filter(!is.na(ssim)) %>%
+  ggplot(aes(x = frame_send_seq, y = ssim)) +
+    labs(x = "Frame Number", y = "SSIM") +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    geom_line(color = config$single_color) +
+    theme_om()
+```
+
+*Increment of sent frame indices (based on barcode matching):*
+
+```{r frame-incr, fig.width = 9, fig.height = 2}
+ssim %>%
+  filter(!is.na(frame_incr)) %>%
+  ggplot(aes(x = frame_send_seq, y = frame_incr)) +
+    labs(x = "Frame Number", y = "Frame Increment") +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    ylim(0,NA) +
+    geom_point(color = config$single_color, size = 0.5) +
+    theme_om()
+```
+
+*Video RTP-level jitter:*
+
+```{r jitter, fig.width = 9, fig.height = 2.5}
+receiver_frames %>%
+  filter(media_type == 16 & tp_dst == 8801) %>%
+  ggplot(aes(x = rel_min_ts_s, y = jitter_ms)) +
+    labs(x = "Time [s]", y = "Jitter [ms]") +
+    ylim(0, NA) +
+    scale_x_continuous(breaks = seq(0,1000,60), expand = c(0.02,0)) +
+    geom_line(color = config$single_color) +
+    theme_om()
+```
+
+*Video Frame rate:*
+
+```{r fps, fig.width = 9, fig.height = 2.5}
+receiver_frames %>%
+  filter(media_type == 16 & tp_dst == 8801) %>%
+  ggplot(aes(x = rel_min_ts_s, y = fps)) +
+    labs(x = "Time [s]", y = "Frame Rate [fps]") +
+    ylim(0, NA) +
+    scale_x_continuous(breaks = seq(0,1000,60), expand = c(0.02,0)) +
+    geom_line(color = config$single_color) +
+    theme_om()
+```
+
+*Frame size:*
+
+```{r frame-size, fig.width = 9, fig.height = 2.5}
+receiver_frames %>%
+  filter(media_type == 16 & tp_dst == 8801) %>%
+  ggplot(aes(x = rel_min_ts_s, y = frame_size)) +
+    labs(x = "Time [s]", y = "Frame Size [B]") +
+    ylim(0, NA) +
+    scale_x_continuous(breaks = seq(0,1000,60), expand = c(0.02,0)) +
+    geom_line(color = config$single_color) +
+    theme_om()
+```

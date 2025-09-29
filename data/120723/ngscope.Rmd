@@ -1,0 +1,52 @@
+---
+title: "WebRTC Cellular 11/13 Experiment: NG-Scope Data"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  start_ts_s: 1701983761
+  ngscope_uplink_file: "120723-ngscope-up.csv"
+  ngscope_downlink_file: "120723-ngscope-down.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+ngscope <- bind_rows(
+  (read_csv(params$ngscope_uplink_file, col_names = c("ts_us","mcs","rv"), col_types="") %>%
+    mutate(ts_s = (ts_us / 1e6) - params$start_ts_s) %>%
+    filter (ts_s >= 0) %>%
+    select(-ts_us) %>%
+    mutate(dir = "up")),
+  (read_csv(params$ngscope_downlink_file, col_names = c("ts_us","mcs","rv"), col_types="") %>%
+    mutate(ts_s = (ts_us / 1e6) - params$start_ts_s) %>%
+    filter (ts_s >= 0) %>%
+    select(-ts_us) %>%
+    mutate(dir = "down"))) %>%
+  mutate(dir = as.factor(dir))
+```
+
+```{r mcs-ts}
+ngscope %>%
+  ggplot(aes(x = ts_s, y = mcs)) +
+    labs(x = "Time [s]", y = "MCS", color = "Direction") +
+    geom_point(color = "dodgerblue4", size = 0.25) +
+    facet_wrap(~dir, nrow = 2) +
+    theme_om()
+```
+
+```{r rv-ts}
+ngscope %>%
+  ggplot(aes(x = ts_s, y = rv)) +
+    labs(x = "Time [s]", y = "RV") +
+    geom_point(color = "dodgerblue4", size = 0.25) +
+    facet_wrap(~dir, nrow = 2) +
+    theme_om()
+```

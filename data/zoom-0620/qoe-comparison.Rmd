@@ -1,0 +1,218 @@
+---
+title: "Zoom 06/20 - QoE Comparison"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  g5_hi_cross_experiment_name:   "zoom-0620-5g-hi-cross"
+  tc_hi_cross_experiment_name:   "zoom-0620-tc-hi-cross"
+  fig_path: fig/
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+config <- list(
+  "files" = list(
+    "g5_hi_crosss" = list(
+      "ssim_file" = paste(params$g5_hi_cross_experiment_name, paste(params$g5_hi_cross_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "core_frames_file" = paste(params$g5_hi_cross_experiment_name, paste(params$g5_hi_cross_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    ),
+    "tc_hi_cross" = list(
+      "ssim_file" = paste(params$tc_hi_cross_experiment_name, paste(params$tc_hi_cross_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "receiver_frames_file" = paste(params$tc_hi_cross_experiment_name, paste(params$tc_hi_cross_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    )
+  ),
+  "single_color" = "dodgerblue4"
+)
+```
+
+
+```{r import}
+ssim <- list(
+  "g5_hi_cross" = read_csv(config$files$g5_hi_cross$ssim_file, col_types="iiin", comment="#"),
+  "tc_hi_cross" = read_csv(config$files$tc_hi_cross$ssim_file, col_types="iiin", comment="#")
+)
+
+core_receiver_frames <- list(
+  "g5_hi_cross" = read_csv(config$files$g5_hi_cross$core_frames_file, col_types = "nciciiffnnnnniiiin"),
+  "tc_hi_cross" = read_csv(config$files$tc_hi_cross$receiver_frames_file, col_types = "nciciiffnnnnniiiin")
+)
+```
+
+```{r ssim-cdf, fig.height = 4, fig.width = 6}
+
+bind_rows(
+  ssim$g5_hi_cross %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "5g_hi_cross") %>% filter(!is.na(ssim)),
+  ssim$tc_hi_cross %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "tc_hi_cross") %>% filter(!is.na(ssim))
+
+) %>% 
+  ggplot(aes(x = ssim, color = type)) +
+    labs(x = "SSIM", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_hi_cross", "tc_hi_cross"),
+      labels = c("5G/Hi-Cross", "TC/Hi-Cross")) +
+    stat_ecdf() +
+    # xlim(0.825,0.875) +
+    theme_om() +
+    theme(
+      legend.position.inside = c(0.975,0.5)
+    )
+```
+
+```{r fps-cdf, fig.height = 4, fig.width = 6}
+
+bind_rows(
+  core_receiver_frames$g5_hi_cross %>% mutate(type = "5g_hi_cross"),
+  core_receiver_frames$tc_hi_cross %>% mutate(type = "tc_hi_cross") ,
+) %>% filter(media_type == 16) %>% select(type, fps) %>%
+  ggplot(aes(x = fps, color = type)) +
+    labs(x = "Frame Rate [fps]", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_hi_cross", "tc_hi_cross"),
+      labels = c("5G/Hi-Cross", "TC/Hi-Cross")) +
+    stat_ecdf() +
+    theme_om() +
+    xlim(0,35) +
+    theme(
+      legend.position.inside = c(0.2,0.75)
+)
+```
+
+
+```{r fps-cdf-paper, fig.height = 2, fig.width = 3}
+
+bind_rows(
+  core_receiver_frames$g5_hi_cross %>% mutate(type = "g5_hi_cross"),
+  core_receiver_frames$tc_hi_cross %>% mutate(type = "tc_hi_cross")
+) %>% filter(media_type == 16) %>% select(type, fps) %>%
+  ggplot(aes(x = fps, color = type)) +
+    labs(x = "Frame Rate [fps]", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("g5_hi_cross","tc_hi_cross"),
+      labels = c("5G","Emulated")) +
+    stat_ecdf() +
+    theme_om() +
+    xlim(0,35) +
+    theme(
+      legend.position.inside = c(0.38,0.8),
+      legend.title = element_blank())
+```
+
+
+```{r ssim-cdf-paper, fig.height = 2, fig.width = 3}
+
+bind_rows(
+  ssim$g5_hi_cross %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "5g_hi_cross") %>% filter(!is.na(ssim)),
+  ssim$tc_hi_cross %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "tc_hi_cross") %>% filter(!is.na(ssim))
+
+) %>% 
+  ggplot(aes(x = ssim, color = type)) +
+    labs(x = "SSIM", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_hi_cross", "tc_hi_cross"),
+      labels = c("5G","Emulated")) +
+    stat_ecdf() +
+    xlim(0.7,0.9) +
+    theme_om() +
+    theme(
+      legend.position.inside = c(0.38,0.8),
+      legend.title = element_blank())
+```
+
+```{r jitter-cdf, fig.height = 4, fig.width = 6}
+
+# bind_rows(
+#   core_receiver_frames$g5_static %>% mutate(type = "5g_static"),
+#   core_receiver_frames$g5_marginal %>% mutate(type = "5g_marginal"),
+#   core_receiver_frames$g5_mobile %>% mutate(type = "5g_mobile"),
+#   core_receiver_frames$tc_static %>% mutate(type = "tc_static"),
+#   core_receiver_frames$tc_marginal %>% mutate(type = "tc_marginal"),
+#   core_receiver_frames$tc_mobile %>% mutate(type = "tc_mobile")
+# ) %>% filter(media_type == 16) %>% select(type, jitter_ms) %>%
+#   ggplot(aes(x = jitter_ms, color = type)) +
+#     labs(x = "Video Jitter [ms] (log.)", y = "CDF") +
+#     scale_color_brewer(
+#       name = "Experiment",
+#       palette = "Set1",
+#       breaks = c("5g_static", "5g_mobile", "5g_marginal", "tc_static", "tc_marginal", "tc_mobile"),
+#       labels = c("5G/static", "5G/mobile", "5G/marginal", "TC/static", "TC/marginal", "TC/mobile")) +
+#     scale_x_log10(expand = c(0.05, 0), limits = c(10,100), breaks = c(10, 100)) +
+#     annotation_logticks(sides = "b", mid = unit(0.15, "cm"), long = unit(0.2, "cm"), color = "gray30") +
+#     stat_ecdf() +
+#     theme_om() +
+#     # xlim(0,NA) +
+#     theme(
+#       legend.position.inside = c(0.2,0.7)
+#     )
+```
+
+```{r jitter-cdf-paper, fig.height = 1.8, fig.width = 2.4}
+# bind_rows(
+#   core_receiver_frames$g5_marginal %>% mutate(type = "5g_marginal"),
+#   core_receiver_frames$tc_marginal %>% mutate(type = "tc_marginal")
+# ) %>% filter(media_type == 16) %>% select(type, jitter_ms) %>%
+#   ggplot(aes(x = jitter_ms, color = type)) +
+#     labs(x = "Video Jitter [ms] (log.)", y = "CDF") +
+#     scale_color_brewer(
+#       name = "Experiment",
+#       palette = "Set1",
+#       breaks = c("5g_marginal", "tc_marginal"),
+#       labels = c("5G/marginal", "TC/marginal")) +
+#     scale_x_log10(expand = c(0.05, 0), limits = c(10,100), breaks = c(10, 100)) +
+#     annotation_logticks(sides = "b", mid = unit(0.15, "cm"), long = unit(0.2, "cm"), color = "gray30") +
+#     stat_ecdf() +
+#     theme_om() +
+#     # xlim(0,NA) +
+#     theme(
+#       legend.position.inside = c(0.95,0.35)
+#     )
+```
+
+
+```{r bitrate-cdf-paper, fig.height = 2, fig.width = 3}
+bind_rows(
+  core_receiver_frames$g5_hi_cross %>% mutate(type = "g5_hi_cross"),
+  core_receiver_frames$tc_hi_cross %>% mutate(type = "tc_hi_cross")
+) %>% filter(tp_src == 8801) %>%
+  group_by(type, min_ts_s) %>%
+  summarize(bitrate = sum(frame_size) * 8 / 1000, .groups = "drop") %>%
+  ggplot(aes(x = bitrate, color = type)) +
+    labs(x = "Receive Bitrate [Kbps]", y = "CDF") +
+    scale_x_continuous(expand = c(0.15,0)) +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("g5_hi_cross", "tc_hi_cross"),
+      labels = c("5G", "Emulated")) +
+    # xlim(0,1500) +
+    stat_ecdf() +
+    theme_om() +
+    theme(
+      legend.position.inside = c(0.38,0.8),
+      legend.title = element_blank())
+```
+
+
+```{r}
+# core_receiver_frames$g5_marginal %>%
+#   filter(tp_src == 8801) %>%
+#   filter(min_ts_s == 1718648583) %>%
+#   group_by(min_ts_s) %>%
+#   summarize(bitrate = sum(frame_size))
+
+```
+

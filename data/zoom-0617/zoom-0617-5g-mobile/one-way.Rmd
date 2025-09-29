@@ -1,0 +1,47 @@
+---
+title: "Zoom 06/17 - 5G, mobile - One-way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0617-5g-mobile"
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+
+config <- list(
+  "join_pkts_up_file" = paste(params$experiment_name, "join-pkts-up.csv", sep = "-"),
+  "single_color"      = "dodgerblue4"
+)
+```
+
+```{r import}
+pkts <- read_csv(config$join_pkts_up_file, col_types = "nnfinfinifnniifnnn")
+```
+
+```{r owd-up-cdf, fig.width=3, fig.height=3}
+pkts %>%
+  filter(!is.na(owd_ms)) %>%
+  ggplot(aes(x = owd_ms)) +
+    labs(x = "One-Way Delay [ms]", y = "CDF") + 
+    scale_x_log10(
+      limits = c(10, 2000),
+      breaks = c(10, 100, 1000),
+      labels = scales::trans_format("log10", scales::math_format(10^.x))) + 
+    annotation_logticks(sides = "b") +
+    stat_ecdf(color = config$single_color) +
+    theme_om()
+```
+
+```{r fig.width = 10, fig.height = 3}
+pkts %>%
+  filter(ts_ms_sender < 50000) %>%
+  ggplot(aes(x = ts_ms_sender, y = owd_ms)) +
+    labs(x = "Time [ms]", y = "One-Way Delay [ms]") +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    geom_line(color = config$single_color) +
+    theme_om()
+```
+

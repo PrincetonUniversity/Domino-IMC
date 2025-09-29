@@ -1,0 +1,89 @@
+---
+title: "Zoom 06/17 - 5G, good channel, static - Join"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-no-tc-0623-1"
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+
+config <- list(
+  "sender_pkts_file"  = paste(params$experiment_name, "sender-pkts.csv", sep = "-"),
+  "receiver_pkts_file"    = paste(params$experiment_name, "receiver-pkts.csv", sep = "-"),
+  "join_pkts_up_file" = paste(params$experiment_name, "join-pkts-up.csv", sep = "-"),
+  "single_color"      = "dodgerblue4"
+)
+```
+
+```{r import}
+sender_pkts <- read_csv(config$sender_pkts_file, col_types = "nnfffcicifiniiniff") %>%
+  mutate(dir = if_else(tp_dst == 8801, "u", "d")) %>%
+  select(-c("flow_type", "ip_proto", "ip_src", "tp_src", "ip_dst", "tp_dst", "drop"))
+receiver_pkts <- read_csv(config$receiver_pkts_file, col_types = "nnfffcicifiniiniff") %>%
+  mutate(dir = if_else(tp_src == 8801, "u", "d")) %>%
+  select(-c("flow_type", "ip_proto", "ip_src", "tp_src", "ip_dst", "tp_dst", "drop"))
+```
+
+
+```{r}
+join_up <- full_join(
+  sender_pkts %>% filter(dir == "u"),
+  receiver_pkts %>% filter(dir == "u"),
+  by = join_by("dir", "media_type", "ssrc", "pt", "rtp_seq", "rtp_ts"),
+  suffix = c("_sender", "_receiver")) %>%
+  select(-c("dir")) %>%
+  filter(!is.na(ts_s_sender) & !is.na(ts_s_receiver))
+```
+
+```{r}
+join_up %<>%
+  mutate(
+    ts_ms_sender = (ts_s_sender - min(join_up$ts_s_sender)) * 1000 + ts_us_sender / 1000,
+    ts_ms_receiver   = (ts_s_receiver - min(join_up$ts_s_sender)) * 1000 + ts_us_receiver / 1000,
+    owd_ms       = ts_ms_receiver - ts_ms_sender) %>%
+  write_csv(config$join_pkts_up_file)
+```
+
+
+```{r}
+join_up %>%
+  group_by(pt, ssrc, media_type) %>%
+  summarize(n = n(), dur_min = (max(ts_ms_sender) - min(ts_ms_sender)) / 1000 / 60, .groups = "drop")
+```
+
+```{r}
+join_up %>%
+  filter(owd_ms < 0)
+```
+
+
+
+
+```{r, fig.width=6, fig.height=3}
+join_up %>%
+  mutate(ssrc = as.factor(ssrc),
+         pt = as.factor(pt),
+         ssrc_pt = forcats::fct_cross(ssrc, pt, sep = "/")) %>%
+  ggplot(aes(x = ts_ms_sender / 1000 / 60, y = rtp_seq, color = ssrc_pt)) +
+    labs(x = "Time [min]", y = "RTP Sequence", color = "SSRC/PT") +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    scale_y_continuous(expand = c(0.02, 0), limits = c(0, 65536)) +
+    geom_line() +
+    theme_om() +
+    theme(legend.position.inside = c(0.23, 0.78))
+```
+
+```{r owd-up-cdf, fig.width=3, fig.height=3}
+join_up %>%
+  ggplot(aes(x = owd_ms)) +
+    labs(x = "One-way Delay [ms]", y = "CDF") +
+    scale_x_continuous(expand = c(0.05, 0), limits = c(0,200)) +
+    scale_y_continuous(expand = c(0.02, 0)) +
+    stat_ecdf(color = color_palette("Set1")[[2]]) +
+    theme_om()
+```
+

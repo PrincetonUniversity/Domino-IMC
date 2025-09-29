@@ -1,0 +1,112 @@
+---
+title: "WebRTC Cellular 12/22 Experiment: One-way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ue_data_file: "122223-ue.csv"
+  sfu_data_file: "122223-sfu.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+pkts_ue <- read_csv(params$ue_data_file, col_types="") %>%
+  mutate(
+    rtp_ssrc = as.factor(rtp_ssrc),
+    rtp_pt = as.factor(rtp_pt),
+    dir = as.factor(if_else(ip_src == "192.168.68.8", "down", "up")),
+    rtp_tw_seq = if_else(is.na(rtp_tw_seq3), rtp_tw_seq5, rtp_tw_seq3)
+  ) %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst) %>%
+  select(-c(encap, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ip_ttl,
+            rtp_tw_seq3, rtp_tw_seq5)) %>%
+  mutate(flow_id = as.factor(cur_group_id()))
+
+pkts_sfu <- read_csv(params$sfu_data_file, col_types="") %>%
+  mutate(
+    rtp_ssrc = as.factor(rtp_ssrc),
+    rtp_pt = as.factor(rtp_pt),
+    dir = as.factor(if_else(ip_src == "192.168.68.8", "down", "up")),
+    rtp_tw_seq = if_else(is.na(rtp_tw_seq3), rtp_tw_seq5, rtp_tw_seq3)
+  ) %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst) %>%
+  select(-c(encap, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ip_ttl,
+            rtp_tw_seq3, rtp_tw_seq5)) %>%
+  mutate(flow_id = as.factor(cur_group_id()))
+
+start_ts_s <- max(c(min(pkts_sfu$ts_s), min(pkts_ue$ts_s)))
+
+pkts_ue %<>%
+  filter(ts_s >= start_ts_s) %>%
+  mutate(ts_s = ts_s - start_ts_s) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, ts_us)) %>%
+  relocate(ts_ms, dir, flow_id)
+
+pkts_sfu %<>%
+  filter(ts_s >= start_ts_s) %>%
+  mutate(ts_s = ts_s - start_ts_s) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, ts_us)) %>%
+  relocate(ts_ms, dir, flow_id)
+
+one_way_delay <- left_join(pkts_ue, pkts_sfu,
+  join_by(rtp_seq, rtp_ts, rtp_tw_seq), suffix = c("_ue", "_sfu")) %>%
+  filter(!is.na(dir_sfu) & !is.na(dir_ue)) %>% # removed observations that did not get joined
+  select(-c(flow_id_sfu,rtp_ssrc_sfu,rtp_pt_sfu,frame_len_sfu,media_len_sfu)) %>%
+  mutate(one_way_ms = if_else(dir_ue == "up", ts_ms_sfu - ts_ms_ue, ts_ms_ue - ts_ms_sfu)) %>%
+  relocate(
+    ts_ms_ue, ts_ms_sfu, one_way_ms,
+    flow_id_ue, dir_ue, dir_sfu,
+    rtp_ssrc = rtp_ssrc_ue, rtp_pt = rtp_pt_ue, rtp_seq, rtp_ts, rtp_tw_seq,
+    frame_len = frame_len_ue, media_len = media_len_ue)
+```
+
+```{r}
+one_way_delay %>%
+  group_by(dir_ue) %>%
+  summarize(n = n(), mean = mean(one_way_ms))
+```
+
+```{r one-way-short, fig.width = 12, fig.height = 2.8}
+plot_start <- 500000
+one_way_delay %>%
+  filter(dir_ue == "up" & ts_ms_ue >= plot_start & ts_ms_ue < plot_start + 1500) %>%
+  ggplot(aes(x = rtp_tw_seq, y = one_way_ms)) +
+    labs(x = "Transport-CC Seq. No.", y = "One-way Delay [ms]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    geom_point(color = "dodgerblue4", size = 0.75) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r one-way-long, fig.width = 12, fig.height = 2.8}
+plot_start <- 400000
+one_way_delay %>%
+  filter(dir_ue == "up" & ts_ms_ue >= plot_start & ts_ms_ue < plot_start + 120000) %>%
+  ggplot(aes(x = rtp_tw_seq, y = one_way_ms)) +
+    labs(x = "Transport-CC Seq. No.", y = "One-way Delay [ms]") +
+    scale_x_continuous(expand = c(0.005, 0)) +
+    geom_point(color = "dodgerblue4", size = 0.5) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+
+```{r}
+one_way_delay %>%
+  mutate(one_way_s = one_way_ms / 1000) %>%
+  ggplot(aes(x = one_way_s, color = dir_ue)) +
+    labs(x = "One-way Delay [s]", y = "CDF", color = "Direction") +
+    stat_ecdf() +
+    theme_om()
+```
+

@@ -1,0 +1,160 @@
+---
+title: "WebRTC Cellular 04/22 Experiment (Private 4G/RR): WebRTC Statistics"
+output:
+  html_document:
+    df_print: paged
+params:
+  source_pc_file: "p2p-4g-rr-042224-source-pc.csv"
+  sink_rtp_in_file: "p2p-4g-rr-042224-sink-in-rtp.csv"
+  source_rtp_out_file: "p2p-4g-rr-042224-source-out-rtp.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high",dpi = 300, fig.path=params$fig_path)
+```
+
+```{r import}
+pc <- read_csv(params$source_pc_file, col_types="")
+min_timestamp <- min(pc$timestamp)
+pc %<>% mutate(timestamp = timestamp - min_timestamp)
+
+rtp_in <- read_csv(params$sink_rtp_in_file, col_types="") %>%
+  mutate(timestamp = timestamp - min_timestamp) %>%
+  filter(timestamp > 0)
+
+rtp_out <- read_csv(params$source_rtp_out_file, col_types="") %>%
+  mutate(timestamp = timestamp - min_timestamp) %>%
+  filter(timestamp > 0)
+```
+```{r bytes-sent, fig.width = 10, fig.height = 2.5}
+pc %>% 
+  mutate(timestamp = as.integer(timestamp / 1000)) %>%
+  group_by(timestamp) %>%
+  summarize(totalPacketsSent = max(packetsSent), totalBytesSent = max(bytesSent)) %>%
+  mutate(packetsSent = totalPacketsSent - lag(totalPacketsSent), kbits = (totalBytesSent - lag(totalBytesSent)) / 1000 * 8) %>%
+  ggplot(aes(x = timestamp, y = kbits)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    ylim(0, 4000) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+  
+  
+  
+  # mutate(availableOutgoingBitrate = availableOutgoingBitrate / 1000) %>%
+  # ggplot(aes(x = timestamp, y = availableOutgoingBitrate)) +
+  #   scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+  #   ylim(0, NA) +
+  #   geom_line(color = "#4b7db3") +
+  #   theme_om()
+```
+
+```{r avail-br, fig.width = 10, fig.height = 2.5}
+pc %>% 
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(availableOutgoingBitrate = availableOutgoingBitrate / 1000) %>%
+  ggplot(aes(x = timestamp, y = availableOutgoingBitrate)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    ylim(0, 4000) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```
+
+```{r rtt, fig.width = 8, fig.height = 2.5}
+pc %>% 
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(currentRoundTripTime = currentRoundTripTime * 1000) %>%
+  ggplot(aes(x = timestamp, y = currentRoundTripTime)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    scale_y_log10(breaks=c(10,100,1000), limits = c(10,1000)) +
+    annotation_logticks(sides = "l") +
+    # ylim(0, NA) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```
+
+
+```{r jitter, fig.width = 8, fig.height = 2.5}
+rtp_in %>% 
+  group_by(kind) %>%
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = jitter, color = kind)) +
+    scale_color_brewer(palette = "Set1") +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    ylim(0, NA) +
+    geom_line() +
+    theme_om()
+```
+
+```{r fps, fig.width = 8, fig.height = 2.5}
+rtp_in %>% 
+  filter(kind == "video") %>%
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = framesPerSecond)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    ylim(0, NA) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```
+```{r freeze-dur, fig.width = 8, fig.height = 2.5}
+rtp_in %>% 
+  filter(kind == "video") %>%
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = totalFreezesDuration)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    ylim(0, NA) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```
+
+```{r avg-buf-delay, fig.width = 8, fig.height = 2.5}
+rtp_in %>% 
+  filter(kind == "video") %>%
+  mutate(timestamp = timestamp / 1000) %>%
+  ggplot(aes(x = timestamp, y = jitterBufferMinimumDelay / jitterBufferEmittedCount * 1000)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    ylim(0, NA) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```
+
+
+```{r frame-height, fig.width = 8, fig.height = 2.5}
+rtp_in %>% 
+  filter(kind == "video") %>%
+  mutate(timestamp = timestamp / 1000) %>%
+  ggplot(aes(x = timestamp, y = frameHeight)) +
+    scale_color_brewer(palette = "Set1") +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    scale_y_continuous(breaks = c(280, 360, 540, 720), minor_breaks = NULL) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```
+
+```{r lost-pkts, fig.width = 8, fig.height = 2.5}
+rtp_in %>% 
+  filter(kind == "video") %>%
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = packetsLost)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```
+
+```{r rtx-pkts, fig.width = 8, fig.height = 2.5}
+rtp_in %>% 
+  filter(kind == "video") %>%
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = retransmittedPacketsReceived)) +
+    scale_x_continuous(breaks = seq(0, 1300, 300), expand = c(0.01, 0.01)) +
+    geom_line(color = "#4b7db3") +
+    theme_om()
+```

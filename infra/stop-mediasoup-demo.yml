@@ -1,0 +1,15 @@
+---
+- name: stop mediasoup-demo
+  
+  vars:
+    home_dir: /home/oliver
+  
+  hosts:
+    - sfu
+  
+  tasks:
+    - name: stop mediasoup
+      become: true
+      community.docker.docker_container:
+        name: mediasoup-demo
+        state: stopped

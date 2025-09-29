@@ -1,0 +1,252 @@
+---
+title: "WebRTC Cellular 02/10 ICMP Echo Experiment: One-way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ue_data_file: "ue.csv"
+  enb_data_file: "enb.csv"
+  core_data_file: "core.csv"
+  sfu_data_file: "sfu.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path, dpi = 300) 
+
+library(RColorBrewer)
+```
+
+```{r import}
+pkts_ue <- read_csv(params$ue_data_file, col_types="iiffiffci")
+pkts_ue_up <- pkts_ue %>%
+  filter(ip_src == "192.168.176.55" & ip_dst == "192.168.68.4")
+
+pkts_enb <- read_csv(params$enb_data_file, col_types="iiffiffci")
+pkts_enb_up <- pkts_enb %>%
+  filter(ip_src == "192.168.68.12" & ip_dst == "192.168.252.3")
+
+pkts_core <- read_csv(params$core_data_file, col_types="iiffiffci")
+pkts_core_up <- pkts_core %>%
+  filter(ip_src == "172.250.255.253" & ip_dst  == "192.168.68.4")
+
+pkts_sfu <- read_csv(params$sfu_data_file, col_types="iiffiffci")
+pkts_sfu_up <- pkts_sfu %>%
+  filter(ip_src == "192.168.68.2" & ip_dst == "192.168.68.4")
+
+base_ts_s <- max(
+  min(pkts_ue_up$ts_s),
+  min(pkts_enb_up$ts_s),
+  min(pkts_core_up$ts_s),
+  min(pkts_sfu_up$ts_s))
+
+pkts_ue_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_enb_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_core_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_sfu_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+```
+
+```{r}
+pkts_ue_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+pkts_enb_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+pkts_core_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+pkts_sfu_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+
+owd <- pkts_ue_up %>%
+  # join enb
+  left_join(pkts_enb_up, join_by(icmp_id, icmp_seq), suffix = c("_ue", "_enb")) %>%
+  mutate(owd_ue_enb = ts_ms_rel_enb - ts_ms_rel_ue) %>%
+  # join core
+  left_join(pkts_core_up, join_by(icmp_id, icmp_seq)) %>%
+  rename(ts_ms_rel_core = ts_ms_rel) %>%
+  mutate(owd_enb_core = ts_ms_rel_core - ts_ms_rel_enb) %>%
+  # join sfu
+  left_join(pkts_sfu_up, join_by(icmp_id, icmp_seq)) %>%
+  rename(ts_ms_rel_sfu = ts_ms_rel) %>%
+  mutate(owd_core_sfu = ts_ms_rel_sfu - ts_ms_rel_core)
+```
+
+```{r owd-cdf, fig.width= 6, fig.height= 3}
+owd %>%
+  select(owd_ue_enb, owd_enb_core, owd_core_sfu) %>%
+  pivot_longer(c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"), names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = value, color = type)) +
+    labs(x = "Uplink one-way delay [ms]", y = "CDF") +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"),
+      labels = c("UE - eNB","eNB - Core", "Core - SFU")) +
+    stat_ecdf() +
+    theme_om()
+```
+
+```{r seq-owd-1, fig.height = 3, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 1300 & icmp_seq <= 1400) %>%
+  select(icmp_seq,owd_ue_enb, owd_enb_core, owd_core_sfu) %>%
+  pivot_longer(c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"), names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = icmp_seq, y = value, color = type)) +
+    ylim(0,600) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"),
+      labels = c("UE - eNB","eNB - Core", "Core - SFU")) +
+    geom_line() +
+      geom_point(size = 0.5) +
+      theme_om() +
+      theme(
+        legend.position = c(0.98, 0.75))
+```
+
+```{r seq-owd-2, fig.height = 3, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 1400 & icmp_seq <= 1500) %>%
+  select(icmp_seq,owd_ue_enb, owd_enb_core, owd_core_sfu) %>%
+  pivot_longer(c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"), names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = icmp_seq, y = value, color = type)) +
+    ylim(0,600) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"),
+      labels = c("UE - eNB","eNB - Core", "Core - SFU")) +
+    geom_line() +
+      geom_point(size = 0.5) +
+      theme_om() +
+      theme(
+        legend.position = c(0.98, 0.75))
+```
+
+```{r seq-owd-3, fig.height = 3, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 1500 & icmp_seq <= 1600) %>%
+  select(icmp_seq,owd_ue_enb, owd_enb_core, owd_core_sfu) %>%
+  pivot_longer(c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"), names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = icmp_seq, y = value, color = type)) +
+    ylim(0,600) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"),
+      labels = c("UE - eNB","eNB - Core", "Core - SFU")) +
+    geom_line() +
+      geom_point(size = 0.5) +
+      theme_om() +
+      theme(
+        legend.position = c(0.98, 0.75))
+```
+```{r seq-owd-4, fig.height = 3, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 2200 & icmp_seq <= 2300) %>%
+  select(icmp_seq,owd_ue_enb, owd_enb_core, owd_core_sfu) %>%
+  pivot_longer(c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"), names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = icmp_seq, y = value, color = type)) +
+    ylim(0,600) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("owd_ue_enb", "owd_enb_core", "owd_core_sfu"),
+      labels = c("UE - eNB","eNB - Core", "Core - SFU")) +
+    geom_line() +
+      geom_point(size = 0.5) +
+      theme_om() +
+      theme(
+        legend.position = c(0.98, 0.75))
+```
+
+```{r seq-owd-ue-enb-1, fig.height = 2.2, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 1500 & icmp_seq <= 2000) %>%
+  ggplot(aes(x = icmp_seq, y = owd_ue_enb)) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    ylim(0,100) +
+    geom_line(color ="#4DAF4A") +
+    geom_point(size = 0.5, color ="#4DAF4A") +
+    theme_om() +
+    theme(legend.position = c(0.98, 0.75))
+```
+
+```{r seq-owd-ue-enb-2, fig.height = 2.2, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 2000 & icmp_seq <= 2500) %>%
+  ggplot(aes(x = icmp_seq, y = owd_ue_enb)) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    ylim(0,100) +
+    geom_line(color ="#4DAF4A") +
+    geom_point(size = 0.5, color ="#4DAF4A") +
+    theme_om() +
+    theme(legend.position = c(0.98, 0.75))
+```
+
+```{r seq-owd-core-sfu-1, fig.height = 2.2, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 1500 & icmp_seq <= 2000) %>%
+  ggplot(aes(x = icmp_seq, y = owd_core_sfu)) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    ylim(0,600) +
+    geom_line(color ="#E41A1C") +
+    geom_point(size = 0.5, color ="#E41A1C") +
+    theme_om() +
+    theme(legend.position = c(0.98, 0.75))
+```
+
+```{r seq-owd-core-sfu-2, fig.height = 2.2, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 2000 & icmp_seq <= 2500) %>%
+  ggplot(aes(x = icmp_seq, y = owd_core_sfu)) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    ylim(0,600) +
+    geom_line(color ="#E41A1C") +
+    geom_point(size = 0.5, color ="#E41A1C") +
+    theme_om() +
+    theme(legend.position = c(0.98, 0.75))
+```
+
+```{r seq-owd-core-sfu-3, fig.height = 2.2, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 2200 & icmp_seq <= 2300) %>%
+  ggplot(aes(x = icmp_seq, y = owd_core_sfu)) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    ylim(0,600) +
+    geom_line(color ="#E41A1C") +
+    geom_point(size = 0.5, color ="#E41A1C") +
+    theme_om() +
+    theme(legend.position = c(0.98, 0.75))
+```
+```{r seq-owd-core-sfu-4, fig.height = 2.2, fig.width = 8}
+owd %>%
+  filter(icmp_seq >= 2400 & icmp_seq <= 2500) %>%
+  ggplot(aes(x = icmp_seq, y = owd_core_sfu)) +
+    labs(x = "ICMP Seq.", y = "Uplink one-way delay [ms]") +
+    ylim(0,600) +
+    geom_line(color ="#E41A1C") +
+    geom_point(size = 0.5, color ="#E41A1C") +
+    theme_om() +
+    theme(legend.position = c(0.98, 0.75))
+```
+

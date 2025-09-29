@@ -1,0 +1,63 @@
+---
+title: "Zoom 06/25 5G - Frames"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0625-5g"
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+```
+
+```{r import}
+sender_frames <- read_csv(paste(params$experiment_name, "sender-frames.csv", sep = "-"), 
+                          col_types = "nciciiffnnnnniiiin")
+core_frames <- read_csv(paste(params$experiment_name, "core-frames.csv", sep = "-"),
+                        col_types = "nciciiffnnnnniiiin")
+
+time_offset <- min(sender_frames$min_ts_s)
+
+sender_frames %<>%
+  filter(media_type == 15 | media_type == 16) %>% # audio or video
+  filter(!(media_type == 16 & pkts_seen < pkts_hint)) %>% # no FEC frames
+  mutate(
+    min_ts_ms = to_ms(min_ts_s, min_ts_us, time_offset),
+    max_ts_ms = to_ms(max_ts_s, max_ts_us, time_offset)) %>%
+  select(ssrc, media_type, rtp_ext1, rtp_ts, frame_size, fps, min_ts_ms, max_ts_ms)
+
+core_frames %<>%
+  filter(media_type == 15 | media_type == 16) %>% # audio or video
+  filter(!(media_type == 16 & pkts_seen < pkts_hint)) %>% # no FEC frames
+  mutate(
+    min_ts_ms = to_ms(min_ts_s, min_ts_us, time_offset),
+    max_ts_ms = to_ms(max_ts_s, max_ts_us, time_offset)) %>%
+  select(ssrc, media_type, rtp_ext1, rtp_ts, frame_size, fps, min_ts_ms, max_ts_ms)
+```
+
+```{r}
+joined <- inner_join(
+  sender_frames,
+  core_frames,
+  by = join_by(ssrc, media_type, rtp_ts),
+  suffix = c("_sender", "_core")
+)
+```
+
+
+```{r}
+joined %>%
+  filter(min_ts_ms_sender > 450000 & min_ts_ms_sender < 550000) %>%
+  ggplot(aes(x = min_ts_ms_sender, y = fps_sender, color = media_type)) +
+    geom_line()
+```
+
+```{r}
+joined %>%
+  filter(min_ts_ms_sender > 450000 & min_ts_ms_sender < 550000) %>%
+  write_csv("frames_sender_core.csv")
+```
+

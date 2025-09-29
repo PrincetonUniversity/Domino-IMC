@@ -1,0 +1,230 @@
+---
+title: "Zoom 06/17 - QoE Comparison"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  g5_static_experiment_name:   "zoom-0617-5g-good-static"
+  g5_marginal_experiment_name: "zoom-0617-5g-marginal-static"
+  g5_mobile_experiment_name:   "zoom-0617-5g-mobile"
+  tc_static_experiment_name:   "zoom-0617-tc-good-static"
+  tc_marginal_experiment_name: "zoom-0617-tc-marginal-static"
+  tc_mobile_experiment_name:   "zoom-0617-tc-mobile"
+  fig_path: fig/
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+config <- list(
+  "files" = list(
+    "g5_static" = list(
+      "ssim_file" = paste(params$g5_static_experiment_name, paste(params$g5_static_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "core_frames_file" = paste(params$g5_static_experiment_name, paste(params$g5_static_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    ),
+    "g5_marginal" = list(
+      "ssim_file" = paste(params$g5_marginal_experiment_name, paste(params$g5_marginal_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "core_frames_file" = paste(params$g5_marginal_experiment_name, paste(params$g5_marginal_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    ),
+    "g5_mobile" = list(
+      "ssim_file" = paste(params$g5_mobile_experiment_name, paste(params$g5_mobile_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "core_frames_file" = paste(params$g5_mobile_experiment_name, paste(params$g5_mobile_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    ),
+    "tc_static" = list(
+      "ssim_file" = paste(params$tc_static_experiment_name, paste(params$tc_static_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "receiver_frames_file" = paste(params$tc_static_experiment_name, paste(params$tc_static_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    ),
+    "tc_marginal" = list(
+      "ssim_file" = paste(params$tc_marginal_experiment_name, paste(params$tc_marginal_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "receiver_frames_file" = paste(params$tc_marginal_experiment_name, paste(params$tc_marginal_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    ),
+    "tc_mobile" = list(
+      "ssim_file" = paste(params$tc_mobile_experiment_name, paste(params$tc_mobile_experiment_name, "ssim.csv", sep = "-"), sep = "/"),
+      "receiver_frames_file" = paste(params$tc_mobile_experiment_name, paste(params$tc_mobile_experiment_name, "receiver-frames.csv", sep = "-"), sep = "/")
+    )
+  ),
+  "single_color" = "dodgerblue4"
+)
+```
+
+
+```{r import}
+ssim <- list(
+  "g5_static" = read_csv(config$files$g5_static$ssim_file, col_types="iiin", comment="#"),
+  "g5_marginal" = read_csv(config$files$g5_marginal$ssim_file, col_types="iiin", comment="#"),
+  "g5_mobile" = read_csv(config$files$g5_mobile$ssim_file, col_types="iiin", comment="#"),
+  "tc_static" = read_csv(config$files$tc_static$ssim_file, col_types="iiin", comment="#"),
+  "tc_marginal" = read_csv(config$files$tc_marginal$ssim_file, col_types="iiin", comment="#"),
+  "tc_mobile" = read_csv(config$files$tc_mobile$ssim_file, col_types="iiin", comment="#")
+)
+
+core_receiver_frames <- list(
+  "g5_static" = read_csv(config$files$g5_static$core_frames_file, col_types = "nciciiffnnnnniiiin"),
+  "g5_marginal" = read_csv(config$files$g5_marginal$core_frames_file, col_types = "nciciiffnnnnniiiin"),
+  "g5_mobile" = read_csv(config$files$g5_mobile$core_frames_file, col_types = "nciciiffnnnnniiiin"),
+  "tc_static" = read_csv(config$files$tc_static$receiver_frames_file, col_types = "nciciiffnnnnniiiin"),
+  "tc_marginal" = read_csv(config$files$tc_marginal$receiver_frames_file, col_types = "nciciiffnnnnniiiin"),
+  "tc_mobile" = read_csv(config$files$tc_mobile$receiver_frames_file, col_types = "nciciiffnnnnniiiin")
+)
+```
+
+```{r ssim-cdf, fig.height = 4, fig.width = 6}
+
+bind_rows(
+  ssim$g5_static %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "5g_static") %>% filter(!is.na(ssim)),
+  ssim$g5_marginal %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "5g_marginal") %>% filter(!is.na(ssim)),
+  ssim$g5_mobile %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "5g_mobile") %>% filter(!is.na(ssim)),
+  ssim$tc_static %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "tc_static") %>% filter(!is.na(ssim)),
+  ssim$tc_marginal %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "tc_marginal") %>% filter(!is.na(ssim)),
+  ssim$tc_mobile %>% select(ssim) %>%
+    mutate(ssim = if_else(ssim == -1.0, NA, ssim), type = "tc_mobile") %>% filter(!is.na(ssim))
+) %>% 
+  ggplot(aes(x = ssim, color = type)) +
+    labs(x = "SSIM", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_static", "5g_marginal", "5g_mobile", "tc_static", "tc_marginal", "tc_mobile"),
+      labels = c("5G/static", "5G/marginal", "5G/mobile", "TC/static", "TC/marginal", "TC/mobile")) +
+    stat_ecdf() +
+    # xlim(0.825,0.875) +
+    theme_om() +
+    theme(
+      legend.position.inside = c(0.975,0.5)
+    )
+```
+
+```{r fps-cdf, fig.height = 4, fig.width = 6}
+
+bind_rows(
+  core_receiver_frames$g5_static %>% mutate(type = "5g_static"),
+  core_receiver_frames$g5_marginal %>% mutate(type = "5g_marginal"),
+  core_receiver_frames$g5_mobile %>% mutate(type = "5g_mobile"),
+  core_receiver_frames$tc_static %>% mutate(type = "tc_static") ,
+  core_receiver_frames$tc_marginal %>% mutate(type = "tc_marginal") ,
+  core_receiver_frames$tc_mobile %>% mutate(type = "tc_mobile")
+) %>% filter(media_type == 16) %>% select(type, fps) %>%
+  ggplot(aes(x = fps, color = type)) +
+    labs(x = "Frame Rate [fps]", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_static", "5g_marginal", "5g_mobile", "tc_static", "tc_marginal", "tc_mobile"),
+      labels = c("5G/static", "5G/marginal", "5G/mobile", "TC/static", "TC/marginal", "TC/mobile")) +
+    stat_ecdf() +
+    theme_om() +
+    xlim(0,35) +
+    theme(
+      legend.position.inside = c(0.2,0.75)
+)
+```
+
+
+```{r fps-cdf-paper, fig.height = 1.8, fig.width = 2.4}
+
+bind_rows(
+
+  core_receiver_frames$g5_marginal %>% mutate(type = "5g_marginal"),
+  core_receiver_frames$tc_marginal %>% mutate(type = "tc_marginal")
+) %>% filter(media_type == 16) %>% select(type, fps) %>%
+  ggplot(aes(x = fps, color = type)) +
+    labs(x = "Frame Rate [fps]", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_marginal","tc_marginal"),
+      labels = c("5G/marginal","TC/marginal")) +
+    stat_ecdf() +
+    theme_om() +
+    xlim(0,35) +
+    theme(
+      legend.position.inside = c(0.6,0.65)
+)
+```
+
+```{r jitter-cdf, fig.height = 4, fig.width = 6}
+
+bind_rows(
+  core_receiver_frames$g5_static %>% mutate(type = "5g_static"),
+  core_receiver_frames$g5_marginal %>% mutate(type = "5g_marginal"),
+  core_receiver_frames$g5_mobile %>% mutate(type = "5g_mobile"),
+  core_receiver_frames$tc_static %>% mutate(type = "tc_static"),
+  core_receiver_frames$tc_marginal %>% mutate(type = "tc_marginal"),
+  core_receiver_frames$tc_mobile %>% mutate(type = "tc_mobile")
+) %>% filter(media_type == 16) %>% select(type, jitter_ms) %>%
+  ggplot(aes(x = jitter_ms, color = type)) +
+    labs(x = "Video Jitter [ms] (log.)", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_static", "5g_mobile", "5g_marginal", "tc_static", "tc_marginal", "tc_mobile"),
+      labels = c("5G/static", "5G/mobile", "5G/marginal", "TC/static", "TC/marginal", "TC/mobile")) +
+    scale_x_log10(expand = c(0.05, 0), limits = c(10,100), breaks = c(10, 100)) +
+    annotation_logticks(sides = "b", mid = unit(0.15, "cm"), long = unit(0.2, "cm"), color = "gray30") +
+    stat_ecdf() +
+    theme_om() +
+    # xlim(0,NA) +
+    theme(
+      legend.position.inside = c(0.2,0.7)
+    )
+```
+
+```{r jitter-cdf-paper, fig.height = 1.8, fig.width = 2.4}
+bind_rows(
+  core_receiver_frames$g5_marginal %>% mutate(type = "5g_marginal"),
+  core_receiver_frames$tc_marginal %>% mutate(type = "tc_marginal")
+) %>% filter(media_type == 16) %>% select(type, jitter_ms) %>%
+  ggplot(aes(x = jitter_ms, color = type)) +
+    labs(x = "Video Jitter [ms] (log.)", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_marginal", "tc_marginal"),
+      labels = c("5G/marginal", "TC/marginal")) +
+    scale_x_log10(expand = c(0.05, 0), limits = c(10,100), breaks = c(10, 100)) +
+    annotation_logticks(sides = "b", mid = unit(0.15, "cm"), long = unit(0.2, "cm"), color = "gray30") +
+    stat_ecdf() +
+    theme_om() +
+    # xlim(0,NA) +
+    theme(
+      legend.position.inside = c(0.95,0.35)
+    )
+```
+
+
+```{r bitrate-cdf-paper, fig.height = 1.8, fig.width = 2.4}
+bind_rows(
+  core_receiver_frames$g5_marginal %>% mutate(type = "5g_marginal"),
+  core_receiver_frames$tc_marginal %>% mutate(type = "tc_marginal")
+) %>% filter(tp_src == 8801) %>%
+  group_by(type, min_ts_s) %>%
+  summarize(bitrate = sum(frame_size) * 8 / 1000, .groups = "drop") %>%
+  ggplot(aes(x = bitrate, color = type)) +
+    labs(x = "Receive Bitrate [Kbps]", y = "CDF") +
+    scale_color_brewer(
+      name = "Experiment",
+      palette = "Set1",
+      breaks = c("5g_marginal", "tc_marginal"),
+      labels = c("5G/marginal", "TC/marginal")) +
+    stat_ecdf() +
+    theme_om() +
+    theme(
+      legend.position.inside = c(0.58,0.69))
+```
+
+
+```{r}
+core_receiver_frames$g5_marginal %>%
+  filter(tp_src == 8801) %>%
+  filter(min_ts_s == 1718648583) %>%
+  group_by(min_ts_s) %>%
+  summarize(bitrate = sum(frame_size))
+
+```
+

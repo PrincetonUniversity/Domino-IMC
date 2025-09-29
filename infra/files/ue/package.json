@@ -1,0 +1,16 @@
+{
+    "name": "mediasoup-client",
+    "version": "0.1",
+    "description": "",
+    "main": "mediasoup-client.js",
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "type": "module",
+    "author": "Oliver Michel",
+    "license": "MIT",
+    "dependencies": {
+      "puppeteer": "^20.7.4"
+    }
+  }
+  

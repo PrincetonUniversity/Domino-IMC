@@ -1,0 +1,39 @@
+---
+title: "Zoom 06/17 - 5G, marginal channel, static -  One-Way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0617-5g-marginal-static"
+---
+
+
+
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+```
+
+```{r}
+pkts <- read_csv(paste(params$experiment_name, "join-pkts-up.csv", sep = "-"),
+                 col_types = "nnfinfinifnniifnnn")
+```
+
+```{r}
+pkts %>%
+  ggplot(aes(x = owd_ms)) +
+    scale_x_log10() +
+  stat_ecdf()
+```
+
+```{r}
+for (i in 1:nrow(pkts)) {
+  
+  print(pkts[
+  
+  
+  
+}
+```
+

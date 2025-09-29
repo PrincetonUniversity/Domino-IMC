@@ -1,0 +1,49 @@
+---
+title: "WebRTC Cellular 04/19 Experiment (Private 4G/RR): Data Preparation"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  source_data_file: "p2p-4g-rr-041924-source-rtp.csv"
+  sink_data_file: "p2p-4g-rr-041924-sink-rtp.csv"
+  join_file: "p2p-4g-rr-041924-rtp-join.csv"
+  fig_path: "fig/"
+---
+
+```{r setup, include=FALSE}
+source("../r/setup.R")
+```
+
+```{r import}
+pkts_ue <- read_csv(params$source_data_file, col_types="") %>%
+  mutate(encap = as.factor(encap), rtp_ssrc = as.factor(rtp_ssrc), rtp_pt = as.factor(rtp_pt))
+
+pkts_sink <- read_csv(params$sink_data_file, col_types="") %>%
+  mutate(encap = as.factor(encap), rtp_ssrc = as.factor(rtp_ssrc), rtp_pt = as.factor(rtp_pt))
+```
+
+```{r}
+joined <- full_join(
+  pkts_ue %>% select(ts_s, ts_us, rtp_ts, rtp_seq, rtp_tw_seq4, rtp_ssrc, rtp_pt, frame_len, media_len),
+  pkts_sink %>% select(ts_s, ts_us, rtp_ts, rtp_seq, rtp_tw_seq4),
+  by = join_by("rtp_ts", "rtp_seq", "rtp_tw_seq4"),
+  suffix = c("_ue", "_sink")) %>%
+  filter(!is.na(ts_s_ue) & !is.na(ts_s_sink)) %>%
+  arrange(ts_s_ue, ts_us_ue)
+
+start_s <- min(joined$ts_s_ue)
+
+joined %<>% mutate(
+    ts_ms_rel_ue = (ts_s_ue - start_s) * 1000 + ts_us_ue / 1000,
+    ts_ms_rel_sink = (ts_s_sink - start_s) * 1000 + ts_us_sink / 1000,
+    delay_ms = ts_ms_rel_sink - ts_ms_rel_ue)
+
+write_csv(joined, params$join_file)
+```
+
+```{r}
+joined %>%
+  group_by(rtp_ssrc, rtp_pt) %>%
+  summarize(n = n(), .groups = "drop")
+```

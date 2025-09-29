@@ -1,0 +1,43 @@
+---
+title: "Zoom 06/25 5G - Cellular Capacity"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0625-5g"
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+```
+
+```{r import}
+cap <- read_csv(paste(params$experiment_name, "cap.csv", sep = "-"), col_types = "")
+sender_pkts <- read_csv(paste(params$experiment_name, "sender-pkts.csv", sep = "-"), col_types = "")
+```
+
+```{r cap, fig.height = 3, fig.width = 12}
+cap %>%
+  ggplot(aes(x = timestamp / 1000, y = capacity - 0.32)) +
+    labs(title = "Cellular Capacity", x = "Time [s]", y = "Cellular Capacity [Mbps]") +
+    scale_y_continuous(limits = c(0, 4)) +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r zoom-util, fig.height = 3, fig.width = 12}
+sender_pkts %>%
+  mutate(ts_s_rel = ts_s - min(ts_s)) %>%
+  mutate(frame_len = pl_len + 8 + 20 + 14) %>%
+  group_by(ts_s_rel) %>%
+  summarize(pps = n(), bps = sum(frame_len)) %>%
+  ggplot(aes(x = ts_s_rel, y = bps / 1000 / 1000 * 8)) +
+    labs(title = "Zoom Data Rate", x = "Time [s]", y = "Zoom Bitrate [Mbps]") +
+    scale_y_continuous(limits = c(0, 4)) +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+

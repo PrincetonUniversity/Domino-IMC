@@ -1,0 +1,79 @@
+---
+title: "WebRTC Cellular 04/22 Experiment (Private 4G/RR): AV1 SVC Usage"
+output:
+  html_document:
+    df_print: paged
+params:
+  pkts_file: "p2p-4g-rr-042224-rtp-join.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", dpi = 300, fig.path=params$fig_path)
+```
+
+```
+- av1_dd: start, tpl_id=0, frame_num=1
+ - id=0, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch switch switch ]
+ - id=1, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch required required ]
+ - id=2, spatial_layer_id=0, temporal_layer_id=1, dtis=[ not-present discardable not-present required ]
+ - id=3, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=4, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=5, spatial_layer_id=1, temporal_layer_id=1, dtis=[ not-present not-present not-present discardable ]
+- av1_dd: start, tpl_id=6, frame_num=681
+ - id=6, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch switch switch ]
+ - id=7, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch required required ]
+ - id=8, spatial_layer_id=0, temporal_layer_id=1, dtis=[ not-present discardable not-present required ]
+ - id=9, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=10, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=11, spatial_layer_id=1, temporal_layer_id=1, dtis=[ not-present not-present not-present discardable ]
+- av1_dd: start, tpl_id=12, frame_num=64606
+ - id=12, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch switch switch ]
+ - id=13, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch required required ]
+ - id=14, spatial_layer_id=0, temporal_layer_id=1, dtis=[ not-present discardable not-present required ]
+ - id=15, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=16, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=17, spatial_layer_id=1, temporal_layer_id=1, dtis=[ not-present not-present not-present discardable ]
+- av1_dd: start, tpl_id=18, frame_num=1905
+ - id=18, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch switch switch ]
+ - id=19, spatial_layer_id=0, temporal_layer_id=0, dtis=[ switch switch required required ]
+ - id=20, spatial_layer_id=0, temporal_layer_id=1, dtis=[ not-present discardable not-present required ]
+ - id=21, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=22, spatial_layer_id=1, temporal_layer_id=0, dtis=[ not-present not-present switch switch ]
+ - id=23, spatial_layer_id=1, temporal_layer_id=1, dtis=[ not-present not-present not-present discardable ]
+```
+
+```{r import}
+pkts <- read_csv(params$pkts_file, col_types="nnniiffiiiinnnn")
+```
+
+```{r, rows.print=25}
+pkts %<>%
+  mutate(key_frame_group = as.factor(case_when(
+    av1_template_id %in% seq(0, 5)   ~ 1,
+    av1_template_id %in% seq(6, 11)  ~ 2,
+    av1_template_id %in% seq(12, 17) ~ 3,
+    av1_template_id %in% seq(18, 23) ~ 4))) %>%
+  mutate(temporal_layer = as.factor(case_when(
+    av1_template_id %in% c(0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 15, 16, 18, 19, 21, 22) ~ 0,
+    av1_template_id %in% c(2, 5, 8, 11, 14, 17, 20, 23) ~ 1))) %>%
+  mutate(spatial_layer = as.factor(case_when(
+    av1_template_id %in% c(0, 1, 2, 6, 7, 8, 12, 13, 14, 18, 19, 20) ~ 0,
+    av1_template_id %in% c(3, 4, 5, 9, 10, 11, 15, 16, 17, 21, 22, 23) ~ 1))) %>%
+  mutate(svc_layer = as.factor(case_when(
+    spatial_layer == 0 & temporal_layer == 0 ~ "L0T0",
+    spatial_layer == 0 & temporal_layer == 1 ~ "L0T1",
+    spatial_layer == 1 & temporal_layer == 0 ~ "L1T0",
+    spatial_layer == 1 & temporal_layer == 1 ~ "L1T1")))
+
+pkts %>%
+  filter(!is.na(key_frame_group)) %>%
+  group_by(key_frame_group, av1_template_id, temporal_layer, spatial_layer, svc_layer) %>%
+  summarize(n = n(), bytes = sum(media_len), frames = n_distinct(av1_frame_number),
+            .groups = "keep") %>%
+  arrange(av1_template_id)
+```
+

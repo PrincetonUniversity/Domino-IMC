@@ -1,0 +1,49 @@
+---
+- name: install clients
+  
+  vars:
+    home_dir: /home/oliver
+  
+  hosts:
+    - ue
+  
+  tasks:
+
+    - name: install packages 
+      become: yes
+      ansible.builtin.apt:
+        pkg:
+          - docker.io
+        state: present
+        update_cache: yes
+
+    - name: add ~/opt/mediasoup-client directory
+      ansible.builtin.file:
+        path: "{{home_dir}}/opt/mediasoup-client"
+        state: directory
+        mode: "0755"
+
+    - name: copy client files
+      ansible.builtin.copy:
+        src: "ue/{{item}}"
+        dest: "{{home_dir}}/opt/mediasoup-client/{{item}}"
+      loop:
+        - mediasoup-client.dockerfile
+        - mediasoup-client.js
+        - package.json
+
+    - name: copy mediasoup certificate
+      ansible.builtin.copy:
+        src: fullchain.pem
+        dest: "{{home_dir}}/opt/mediasoup-client/"
+
+    - name: build client image
+      become: yes
+      community.docker.docker_image:
+        name: mediasoup-client
+        build:
+          path: "{{home_dir}}/opt/mediasoup-client/"
+          dockerfile: "{{home_dir}}/opt/mediasoup-client/mediasoup-client.dockerfile"
+        state: present
+        source: build
+        tag: latest

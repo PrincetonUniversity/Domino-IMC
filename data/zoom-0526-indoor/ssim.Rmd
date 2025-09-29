@@ -1,0 +1,29 @@
+---
+title: "Zoom 05/26 - SSIM"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  data_file: "ssim_0526_1.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+data <- read_csv(params$data_file, col_types="iiin", comment="#")
+```
+
+
+```{r}
+data %>%
+  group_by(frame_send,barcode) %>%
+  summarize(n = n())
+```
+

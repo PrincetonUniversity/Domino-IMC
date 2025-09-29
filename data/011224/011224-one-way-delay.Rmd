@@ -1,0 +1,143 @@
+---
+title: "WebRTC Cellular 01/12 Experiment: One-way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ue_data_file: "011224-ue.csv"
+  sfu_data_file: "011224-sfu.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+pkts_ue <- read_csv(params$ue_data_file, col_types="") %>%
+  mutate(encap = as.factor(encap), rtp_ssrc = as.factor(rtp_ssrc), rtp_pt = as.factor(rtp_pt))
+
+pkts_sfu <- read_csv(params$sfu_data_file, col_types="") %>%
+  mutate(encap = as.factor(encap), rtp_ssrc = as.factor(rtp_ssrc), rtp_pt = as.factor(rtp_pt))
+```
+
+```{r}
+start_ts_s <- max(c(min(pkts_sfu$ts_s), min(pkts_ue$ts_s)))
+
+pkts_sfu %<>%
+  filter(ts_s >= start_ts_s) %>% 
+  mutate(ts_s = ts_s - start_ts_s) %>% 
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  mutate(dir = as.factor(if_else(ip_src == "192.168.68.8", "tx", "rx"))) %>%
+  mutate(rtp_tw_seq = if_else(!is.na(rtp_tw_seq3), rtp_tw_seq3, rtp_tw_seq5)) %>%
+  select(-c(rtp_tw_seq3, rtp_tw_seq5, ip_ttl, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, 
+            gtp_udp_dst, ts_s, ts_us))
+
+pkts_ue %<>%
+  filter(ts_s >= start_ts_s) %>%
+  mutate(ts_s = ts_s - start_ts_s) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  mutate(dir = as.factor(if_else(ip_src == "192.168.176.55", "tx", "rx"))) %>%
+  mutate(rtp_tw_seq = if_else(!is.na(rtp_tw_seq3), rtp_tw_seq3, rtp_tw_seq5)) %>%
+  select(-c(rtp_tw_seq3, rtp_tw_seq5, ip_ttl, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src,
+            gtp_udp_dst, ts_s, ts_us))
+```
+
+```{r ue-seq, fig.height=2.2, fig.width=6}
+pkts_ue %>%
+  mutate(ts_s = ts_ms / 1e3) %>%
+  ggplot(aes(x = ts_s, y = rtp_tw_seq, color = dir)) +
+    ylim(0, 65536) +
+    labs(x = "Time [s]", y = "Google-CC Sequence No.", color = "Direction") +
+    geom_line() +
+    theme_om()
+```
+
+```{r}
+uplink_joined <- left_join(pkts_ue %>% filter(dir == "tx"), pkts_sfu %>% filter(dir == "rx"),
+                           join_by("rtp_tw_seq", "rtp_seq"), suffix = c("", "_sfu")) %>%
+  select(rtp_ssrc, rtp_pt, rtp_seq, rtp_ts, frame_len, media_len, ts_ms, rtp_tw_seq, ts_ms_sfu) %>%
+  rename(ts_ms_ue = ts_ms) %>%
+  mutate(one_way_delay_ms = ts_ms_sfu - ts_ms_ue)
+
+write_csv(uplink_joined, "011224-uplink.csv")
+
+# downlink_joined <- left_join(pkts_ue %>% filter(dir == "rx"), pkts_sfu %>% filter(dir == "tx"), 
+#                            join_by("rtp_tw_seq", "rtp_seq"), suffix = c("", "_sfu")) %>%
+#   select(rtp_ssrc, rtp_pt, rtp_seq, rtp_ts, frame_len, media_len, ts_ms, rtp_tw_seq, ts_ms_sfu) %>%
+#   rename(ts_ms_ue = ts_ms)
+```
+
+```{r uplink inter-pkt-delay-cdf, fig.width = 4.5, fig.height = 3}
+uplink_joined %>%
+  select(ts_ms_ue, ts_ms_sfu) %>%
+  mutate(ts_ms_ue_delta = ts_ms_ue - lag(ts_ms_ue), ts_ms_sfu_delta = ts_ms_sfu - lag(ts_ms_sfu)) %>%
+  select(ts_ms_ue_delta, ts_ms_sfu_delta) %>%
+  pivot_longer(c("ts_ms_ue_delta", "ts_ms_sfu_delta"), names_to="type", values_to="ts_ms_delta") %>%
+  filter(!is.na(ts_ms_delta)) %>%
+  ggplot(aes(x = ts_ms_delta, color = type)) +
+    labs(title = "Uplink Inter-Packet Spacing", x = "Inter-Packet Spacing [ms]", y = "CDF",
+         color = "Location") +
+    xlim(0, 40) +
+    stat_ecdf() +
+    theme_om()
+```
+
+```{r uplink-one-way-delay-cdf, fig.width = 4.5, fig.height = 3}
+uplink_joined %>%
+  select(one_way_delay_ms) %>%
+  ggplot(aes(x = one_way_delay_ms)) +
+    stat_ecdf(color = "dodgerblue4") +
+    labs(title = "Uplink One-Way Delay", x = "One-Way Delay [ms]", y = "CDF") +
+    xlim(0,40) +
+    theme_om()
+```
+
+```{r uplink-one-way-delay-tail-cdf, fig.width = 4.5, fig.height = 3}
+uplink_joined %>%
+  select(one_way_delay_ms) %>%
+  mutate(one_way_delay_s = one_way_delay_ms / 1000) %>%
+  ggplot(aes(x = one_way_delay_s)) +
+    labs(title = "Uplink One-Way Delay", x = "One-Way Delay (log.) [s]", y = "CDF") +
+    scale_x_log10(labels = format_format(big.mark = "", decimal.mark = ".", scientific = FALSE)) +
+    stat_ecdf(color = "dodgerblue4") +
+    theme_om()
+```
+
+
+```{r one-way-delay-ts, fig.width = 12, fig.height = 3}
+start <- 128000
+
+uplink_joined %>%
+  filter(ts_ms_ue > start & ts_ms_ue < start + 250) %>%
+  ggplot(aes(x = rtp_tw_seq, y = one_way_delay_ms)) +
+    labs(title = "Uplink One-Way Delay", x = "Google-CC Sequence Number", y = "One-Way Delay [ms]") +
+    ylim(0, NA) +
+    geom_point(color = "dodgerblue4") +
+    geom_line(color = "dodgerblue4") + 
+    theme_om()
+```
+
+#   one_way_delay %>%
+#     filter(dir_ue == "tx", ts_ms_ue >= start_ts_ms & ts_ms_ue < start_ts_ms + 250) %>%
+#     ggplot(aes(x = ts_ms_ue, xend = ts_ms_sfu, y = rtp_tw_seq, yend = rtp_tw_seq, color = rtp_ssrc)) +
+#     labs(title = "RTP One-way Delay", x = "Timestamp [ms]", y = "GCC Sequence Number", color = "RTP SSRC") +
+#     geom_point(aes(x = ts_ms_ue, y = rtp_tw_seq, color = rtp_ssrc), size = 0.5) +
+#     geom_point(aes(x = ts_ms_sfu, y = rtp_tw_seq, color = rtp_ssrc), size = 0.5) +
+#     geom_segment() +
+#     theme_om() +
+#     theme(legend.position = c(0.99, 0.28))
+
+```{r one-way-delay-bars, fig.width = 12, fig.height = 5}
+uplink_joined %>%
+  filter(ts_ms_ue > start & ts_ms_ue < start + 250) %>%
+  ggplot(aes(x = ts_ms_ue, xend = ts_ms_sfu, y = rtp_tw_seq, yend = rtp_tw_seq, color = rtp_ssrc)) +
+    labs(x = "Time [ms]", y = "Google-CC Sequence Number", color = "RTP SSRC") +
+    geom_segment(linewidth = 1.25) +
+    theme_om()
+```
+

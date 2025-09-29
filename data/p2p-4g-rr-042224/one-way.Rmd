@@ -1,0 +1,146 @@
+---
+title: "WebRTC Cellular 04/22 Experiment (Private 4G/RR): One-Way Delay"
+output:
+  html_document:
+    df_print: paged
+params:
+  pkts_file: "p2p-4g-rr-042224-rtp-join.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high",dpi = 300, fig.path=params$fig_path)
+```
+
+```{r import}
+pkts <- read_csv(params$pkts_file, col_types="nnniiffiiifnnnn")
+```
+
+```{r owd-up-cdf, fig.width = 5, fig.height = 4}
+pkts %>%
+  select(delay_ms) %>%
+  ggplot(aes(x = delay_ms)) +
+    stat_ecdf(color = "dodgerblue4") +
+    xlim(0, 150) +
+    labs(title = "RTP Uplink One-Way Delay (UE → WebRTC Sink)", x = "One-Way Delay [ms]", y = "CDF") +
+    theme_om()
+```
+
+```{r}
+pkts %>%
+  filter(rtp_ts == 634326568) %>%
+  ggplot(aes(x = ts_ms_rel_ue, xend = ts_ms_rel_sink))
+```
+
+
+```{r inter-pkt-cdf, fig.width = 5, fig.height = 4}
+pkts %>%
+  select(ts_ms_rel_ue, ts_ms_rel_sink) %>%
+  mutate(ts_ms_rel_delta_ue = ts_ms_rel_ue  - lag(ts_ms_rel_ue)) %>%
+  mutate(ts_ms_rel_delta_sink = ts_ms_rel_sink - lag(ts_ms_rel_sink)) %>%
+  pivot_longer(c("ts_ms_rel_delta_ue", "ts_ms_rel_delta_sink"), names_to = "type", 
+               values_to="ts_ms_rel_delta") %>%
+  filter(!is.na(ts_ms_rel_delta)) %>%
+  ggplot(aes(x = ts_ms_rel_delta, color = type)) +
+    xlim(0,35) +
+    stat_ecdf() +
+    labs(title = "RTP Inter-Packet Time (UE → WebRTC Sink)", x = "Time between Packets [ms]", 
+         y = "CDF", color = "location") +
+    scale_color_brewer(
+      name = "Location",
+      palette = "Set1",
+      breaks = c("ts_ms_rel_delta_ue", "ts_ms_rel_delta_sink"),
+      labels = c("UE","Sink")) +
+    theme_om()
+```
+```{r}
+pkts %>%
+  filter(rtp_pt == 45 | rtp_pt == 46) %>%
+  group_by(av1_frame_number, rtp_pt, rtp_ts, av1_template_id) %>%
+  summarize(pkts = n(), len = sum(frame_len), .groups = "drop") %>%
+  arrange(rtp_ts)
+```
+
+```{r}
+pkts %>%
+  filter(rtp_pt == 45) %>%
+  group_by(rtp_pt, av1_template_id) %>%
+  summarize(n = n(), .groups = "drop") %>%
+  mutate(av1_template_id = as.integer(av1_template_id)) %>%
+  arrange(av1_template_id)
+```
+
+
+
+```{r}
+pkts %>%
+  filter(rtp_pt == 45) %>%
+  select(ts_ms_rel_ue, ts_ms_rel_sink, rtp_ts, av1_frame_number) %>%
+  group_by(av1_frame_number, rtp_ts) %>%
+  summarize(
+    spread_ms_ue = max(ts_ms_rel_ue) - min(ts_ms_rel_ue),
+    spread_ms_sink = max(ts_ms_rel_sink) - min(ts_ms_rel_sink),
+    .groups = "drop") %>%
+  arrange(rtp_ts) %>%
+  pivot_longer(c("spread_ms_ue", "spread_ms_sink"), names_to="location", values_to="frame_spread_ms") %>%
+  ggplot(aes(x = frame_spread_ms, color = location)) +
+    scale_color_brewer(palette = "Set1") +
+    stat_ecdf() +
+    xlim(0,50) +
+    theme_om()
+```
+
+
+
+```{r}
+pkts %>%
+  ggplot(aes(x = ts_ms_rel_ue, y = rtp_tw_seq)) +
+    geom_line()
+```
+
+```{r}
+pkts %>%
+  select(rtp_tw_seq, ts_ms_rel_ue) %>%
+  filter(rtp_tw_seq == 65535 | rtp_tw_seq == 0) %>%
+  arrange(ts_ms_rel_ue)
+```
+```{r}
+pkts %<>%
+  mutate(slice = case_when(
+    ts_ms_rel_ue <=  279042.4 ~ 1,
+    ts_ms_rel_ue >=  279060.8 & ts_ms_rel_ue <=  563220.3 ~ 2,
+    ts_ms_rel_ue >=  563220.3 & ts_ms_rel_ue <=  853081.3 ~ 3,
+    ts_ms_rel_ue >=  853081.3 & ts_ms_rel_ue <= 1235849.8 ~ 4,
+    ts_ms_rel_ue >= 1235851.9 ~ 5))
+```
+
+
+```{r}
+base <- 5000
+
+pkts %>%
+  filter(slice == 1 & rtp_tw_seq > base & rtp_tw_seq < base + 35) %>%
+  ggplot(aes(x = ts_ms_rel_ue, xend = ts_ms_rel_sink, y = rtp_tw_seq, yend = rtp_tw_seq, 
+             color = av1_template_id)) +
+    geom_segment(linewidth = 1.4) +
+    theme_om()
+```
+
+
+
+```{r owd-overview-1, fig.width = 14, fig.height=80}
+pkts %>%
+  mutate(rtp_tw_seq_mod1000 = rtp_tw_seq %% 1000) %>%
+  filter(slice == 3) %>%
+  mutate(slice = as.integer(rtp_tw_seq / 1000)) %>%
+  ggplot(aes(x = rtp_tw_seq_mod1000, y = delay_ms)) +
+    labs(x = "RTP TWCC Sequence % 1000", y = "UE-Sink one-way delay [ms]") +
+    ylim(0, NA) +
+    scale_x_continuous(breaks = seq(0, 1000, 100), expand = c(0.0125, 0)) +
+    geom_line(color = "dodgerblue4") +
+    facet_wrap(~slice, ncol=1) +
+    theme_om()
+```

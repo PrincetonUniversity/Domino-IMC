@@ -1,0 +1,69 @@
+---
+title: "WebRTC Cellular 04/19 Experiment (Private 4G/RR): WebRTC Statistics"
+output:
+  html_document:
+    df_print: paged
+params:
+  source_pc_file: "p2p-4g-rr-041924-source-pc.csv"
+  sink_rtp_in_file: "p2p-4g-rr-041924-sink-in-rtp.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high",dpi = 300, fig.path=params$fig_path)
+```
+
+```{r import}
+pc <- read_csv(params$source_pc_file, col_types="")
+min_timestamp <- min(pc$timestamp)
+pc %<>% mutate(timestamp = timestamp - min_timestamp)
+
+rtp_in <- read_csv(params$sink_rtp_in_file, col_types="") %>%
+  mutate(timestamp = timestamp - min_timestamp) %>%
+  filter(timestamp > 0)
+```
+
+```{r}
+pc %>% 
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(currentRoundTripTime = currentRoundTripTime * 1000) %>%
+  ggplot(aes(x = timestamp, y = currentRoundTripTime)) +
+    geom_line()
+```
+
+```{r}
+pc %>% 
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(availableOutgoingBitrate = availableOutgoingBitrate / 1000) %>%
+  ggplot(aes(x = timestamp, y = availableOutgoingBitrate)) +
+    geom_line()
+```
+
+
+```{r}
+rtp_in %>% 
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = jitter)) +
+    scale_y_log10() +
+    geom_line()
+```
+
+```{r}
+rtp_in %>% 
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = framesPerSecond)) +
+    geom_line()
+```
+
+```{r}
+rtp_in %>% 
+  mutate(timestamp = timestamp / 1000) %>%
+  mutate(jitter = jitter * 1000) %>%
+  ggplot(aes(x = timestamp, y = freezeCount)) +
+    geom_line()
+```

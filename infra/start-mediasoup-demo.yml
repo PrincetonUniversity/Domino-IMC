@@ -1,0 +1,28 @@
+---
+- name: start/restart mediasoup-demo
+  
+  vars:
+    home_dir: /home/oliver
+  
+  hosts:
+    - sfu
+  
+  tasks:
+    - name: start/restart mediasoup
+      become: true
+      community.docker.docker_container:
+        name: mediasoup-demo
+        image: mediasoup:latest
+        state: started
+        restart: true
+        ports:
+          - "0.0.0.0:3000:3000/tcp"
+          - "0.0.0.0:4443:4443/tcp"
+          - "0.0.0.0:40000-40099:40000-40099/udp"
+        command: /bin/bash -c 'pm2 start --no-daemon /mediasoup/ecosystem.config.js'
+        env:
+          INTERACTIVE: "false"
+          MEDIASOUP_LISTEN_IP: "0.0.0.0"
+          MEDIASOUP_ANNOUNCED_IP: "192.168.68.8"
+        auto_remove: true
+

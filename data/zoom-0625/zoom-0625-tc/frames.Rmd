@@ -1,0 +1,141 @@
+---
+title: "Zoom 06/25 5G - Frames"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0625-tc"
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+```
+
+```{r import}
+sender_frames <- read_csv(paste(params$experiment_name, "sender-frames.csv", sep = "-"), col_types = "nciciiffnnnnniiiin")
+receiver_frames <- read_csv(paste(params$experiment_name, "receiver-frames.csv", sep = "-"), col_types = "nciciiffnnnnniiiin")
+sender_frames %<>% mutate()
+receiver_frames %<>% mutate(min_ts_ms = to_ms(min_ts_s, min_ts_us, min(sender_frames$min_ts_s)))
+```
+
+```{r}
+frames <- bind_rows(
+  sender_frames %>% mutate(side = as.factor("Sender")),
+  receiver_frames %>% mutate(side = as.factor("Receiver"))) %>%
+  mutate(
+    min_ts_ms = to_ms(min_ts_s, min_ts_us, min(sender_frames$min_ts_s)),
+    max_ts_ms = to_ms(max_ts_s, max_ts_us, min(sender_frames$min_ts_s)),
+    max_ts_s  = as.integer(max_ts_ms / 1000) # for fps calculation
+  )
+```
+
+```{r}
+fps <- frames %>%
+  filter(media_type == 16 & pkts_seen == pkts_hint) %>% # only video without FEC
+  group_by(side, rtp_ext1, max_ts_s) %>%
+  summarize(fps = n(), .groups = "drop")
+```
+
+```{r fps-by-layer, fig.height = 4, fig.width = 12}
+fps %>%
+  ggplot(aes(x = max_ts_s, y = fps, color = rtp_ext1)) +
+    labs(title = "Frame Rate by Frame Type", x = "Time [s]", y = "Frame Rate [fps]", color = "SVC Frame Type") +
+    geom_line() +
+    facet_wrap(~side, nrow = 2) +
+    theme_om() +
+    theme(legend.position = "right")
+```
+
+
+
+
+
+
+
+
+
+```{r receiver-fps, fig.height = 3, fig.width = 12}
+receiver_frames %>%
+  filter(media_type == 16 & pkts_seen == pkts_hint) %>%
+  ggplot(aes(x = ts_ms / 1000, y = fps)) +
+    labs(title = "Frame Rate at Receiver", x = "Time [s]", y = "Frame Rate [fps]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    ylim(0,50) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r sender-fps, fig.height = 3, fig.width = 12}
+sender_frames %>%
+  filter(media_type == 16 & pkts_seen == pkts_hint) %>%
+  ggplot(aes(x = ts_ms / 1000, y = fps)) +
+    labs(title = "Frame Rate at Receiver", x = "Time [s]", y = "Frame Rate [fps]") +
+    ylim(0,50) +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r fps-rx-tx-cdf, fig.width = 4, fig.height = 4}
+bind_rows(
+  sender_frames %>% 
+    filter(media_type == 16 & pkts_seen == pkts_hint) %>%
+    select(fps) %>%
+    mutate(side = as.factor("Sender")),
+  receiver_frames %>% 
+    filter(media_type == 16 & pkts_seen == pkts_hint) %>%
+    select(fps) %>%
+    mutate(side = as.factor("Receiver"))
+) %>%
+  ggplot(aes(x = fps, color = side)) +
+    labs(title = "Sender vs. Receiver Video Frame Rates", x = "Frame Rate [fps]", y = "CDF") +
+    scale_color_brewer(
+      name = "Side",
+      palette = "Set1",
+      breaks = c("Sender", "Receiver"),
+      labels = c("Sender","Receiver")) +
+    stat_ecdf() +
+    theme_om() +
+    theme(legend.position.inside = c(0.98, 0.15))
+```
+```{r fps-rx-tx-ts, fig.width = 10, fig.height = 4}
+bind_rows(
+  sender_frames %>% 
+    filter(media_type == 16 & pkts_seen == pkts_hint) %>%
+    select(ts_ms, fps, rtp_ext1) %>%
+    mutate(side = as.factor("Sender")),
+  receiver_frames %>% 
+    filter(media_type == 16 & pkts_seen == pkts_hint) %>%
+    select(ts_ms, fps, rtp_ext1) %>%
+    mutate(side = as.factor("Receiver"))
+) %>%
+  ggplot(aes(x = ts_ms / 1000, y = fps, color = rtp_ext1)) +
+    labs(title = "Sender vs. Receiver-side Video Frame Rates", x = "Time [s]", y = "Frame Rate [fps]") +
+    scale_color_brewer(
+      name = "Side",
+      palette = "Set1",
+      breaks = c("Sender", "Receiver"),
+      labels = c("Sender","Receiver")) +
+    scale_x_continuous(expand = c(0.03, 0)) +
+    geom_line() +
+    facet_wrap(~side, nrow = 2) +
+    theme_om()
+```
+
+
+
+
+
+```{r fps example}
+receiver_frames %>%
+  filter(media_type == 16 & pkts_seen == pkts_hint) %>%
+  mutate(ts_s = ts_ms / 1000) %>%
+  filter(ts_s > 590 & ts_s < 630) %>%
+  ggplot(aes(x = ts_s, y = fps)) +
+    labs(title = "Frame Rate at Receiver", x = "Time [s]", y = "Frame Rate [fps]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+

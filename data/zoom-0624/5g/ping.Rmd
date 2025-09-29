@@ -1,0 +1,171 @@
+---
+title: "Zoom 06/24 5G - Join"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0624-5g"
+---
+
+```{r}
+to_ms <- function(ts_s, ts_us, off_s = 0) {
+  return((ts_s - off_s) * 1000 + ts_us / 1000)
+}
+```
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+
+config <- list(
+  "ping_sender_file"    = paste(params$experiment_name, "sender-ping.csv", sep = "-"),
+  "ping_core_file"    = paste(params$experiment_name, "core-ping.csv", sep = "-"),
+  "ping_receiver_file"    = paste(params$experiment_name, "receiver-ping.csv", sep = "-"),
+  "single_color" = "dodgerblue4"
+)
+```
+
+```{r import}
+ping_sender <- read_csv(config$ping_sender_file, col_types = "nnffiffni")
+ping_sender %<>% mutate(ts_ms = to_ms(ts_s, ts_us, min(ping_sender$ts_s)))
+
+ping_core <- read_csv(config$ping_core_file, col_types = "nnffiffni") %>%
+  filter(ip_ttl == 63 | ip_ttl == 45)
+ping_core %<>% mutate(ts_ms = to_ms(ts_s, ts_us, min(ping_sender$ts_s)))
+
+ping_receiver <- read_csv(config$ping_receiver_file, col_types = "nnffiffni")
+ping_receiver %<>% mutate(ts_ms = to_ms(ts_s, ts_us, min(ping_sender$ts_s)))
+```
+
+
+```{r}
+sender_delay <- left_join( # second join
+  # x in second join:
+  left_join(
+    # x in first join:
+    ping_sender %>% filter(icmp_type == 8),
+    # y in first join:
+    ping_core %>% filter(icmp_type == 8),
+    by = join_by(icmp_type, icmp_id, icmp_seq),
+    suffix = c("_sender", "_core")) %>%
+  select(ip_src_sender, ip_dst_sender, ip_src_core, icmp_id, icmp_seq, icmp_type, ts_ms_sender, ts_ms_core) %>%
+  mutate(sender_core_ms = ts_ms_core - ts_ms_sender),
+  
+  # y in second join:
+  ping_sender %>% 
+    select(ts_ms, icmp_type, icmp_id, icmp_seq) %>% 
+    filter(icmp_type == 0),
+  by = join_by(icmp_id, icmp_seq)) %>%
+  
+  select(-c(icmp_type.x, icmp_type.y)) %>%
+  rename(ts_ms_sender_return = ts_ms) %>%
+  mutate(
+    core_sender_ms = ts_ms_sender_return - ts_ms_core,
+    rtt_ms = ts_ms_sender_return - ts_ms_sender,
+    idx = row_number())
+
+receiver_delay <- left_join(
+  ping_receiver %>% filter(icmp_type == 8),
+  ping_receiver %>% filter(icmp_type == 0),
+  by = join_by( icmp_id, icmp_seq),
+  suffix = c("_receiver", "_receiver_return")
+)  %>% mutate(
+  rtt_ms = ts_ms_receiver_return - ts_ms_receiver,
+  idx = row_number())
+```
+
+```{r sender-ping-ts1, fig.height = 4, fig.width = 8}
+sender_delay %>%
+  pivot_longer(c("sender_core_ms", "core_sender_ms", "rtt_ms"), names_to="leg", values_to="val") %>%
+  slice(4:2000) %>%
+  ggplot(aes(x = idx, y = val, color = leg)) +
+    labs(title = "Sender ICMP Delay", x = "Packet Index", y = "Latency [ms]") +
+    ylim(0, 40) +
+    scale_x_continuous(expand = c(0.015, 0)) +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("rtt_ms", "core_sender_ms", "sender_core_ms"),
+      labels = c("RTT", sprintf("Core \u2192 Zoom \u2192 Sender"), sprintf("Sender \u2192 Core"))) +
+    geom_line() +
+    theme_om() +
+    theme(
+      legend.direction = "horizontal",
+      legend.position.inside = c(0.99,0.93))
+```
+```{r sender-ping-ts2, fig.height = 6, fig.width = 10, warning = FALSE}
+sender_delay %>%
+  pivot_longer(c("sender_core_ms", "core_sender_ms", "rtt_ms"), names_to="leg", values_to="val") %>%
+  ggplot(aes(x = idx, y = val, color = leg)) +
+    labs(title = "Sender ICMP Delay", x = "Packet Index", y = "Latency [ms]") +
+    ylim(0, 40) +
+    scale_x_continuous(expand = c(0.015, 0)) +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("rtt_ms", "core_sender_ms", "sender_core_ms"),
+      labels = c("RTT", sprintf("Core \u2192 Zoom \u2192 Sender"), sprintf("Sender \u2192 Core"))) +
+    geom_line() +
+    theme_om() +
+    theme(
+      legend.position = "top",
+      legend.background = element_rect(color = "white"),
+      legend.direction = "horizontal",
+      strip.background = element_blank(),
+      strip.text.x = element_blank()) +
+    facet_wrap(~leg, ncol = 1)
+```
+
+
+
+```{r receiver-ping-ts1, fig.height = 4, fig.width = 8}
+receiver_delay %>%
+  slice(2:670) %>%
+  ggplot(aes(x = idx, y = rtt_ms)) +
+    labs(title = "Receiver ICMP Delay", x = "Packet Index", y = "Latency [ms]") +
+    ylim(0, 40) +
+    scale_x_continuous(expand = c(0.015, 0)) +
+    geom_line(color = config$single_color) +
+    theme_om()
+```
+
+
+```{r receiver-ping-ts2, fig.height = 4, fig.width = 8}
+receiver_delay %>%
+  ggplot(aes(x = idx, y = rtt_ms)) +
+    labs(title = "Receiver ICMP Delay", x = "Packet Index", y = "Latency [ms]") +
+    ylim(0, 40) +
+    scale_x_continuous(expand = c(0.015, 0)) +
+    geom_line(color = config$single_color) +
+    theme_om()
+```
+
+```{r sender-ping-cdf, fig.height = 4, fig.width = 6, warning = FALSE}
+sender_delay %>%
+  pivot_longer(c("sender_core_ms", "core_sender_ms", "rtt_ms"), names_to="leg", values_to="val") %>%
+  ggplot(aes(x = val, color = leg)) +
+    labs(title = "Sender ICMP Delay", x = "Delay [ms]", y = "CDF") +
+    scale_x_log10() +
+    scale_color_brewer(
+      name = "Leg",
+      palette = "Set1",
+      breaks = c("rtt_ms", "core_sender_ms", "sender_core_ms"),
+      labels = c("RTT", sprintf("Core \u2192 Zoom \u2192 Sender"), sprintf("Sender \u2192 Core"))) +
+    stat_ecdf() +
+    annotation_logticks(sides = "b", color = "#333333") +
+    theme_om() +
+    theme(legend.position.inside = c(0.99,0.2))
+```
+
+```{r receiver-ping-cdf, fig.height = 4, fig.width = 6, warning = FALSE}
+receiver_delay %>%
+  ggplot(aes(x = rtt_ms)) +
+    labs(title = "Receiver ICMP Delay", x = "Delay [ms]", y = "CDF") +
+    scale_x_log10(limits = c(1,100)) +
+    stat_ecdf(color = config$single_color) +
+    annotation_logticks(sides = "b", color = "#333333") +
+    theme_om() +
+    theme(legend.position.inside = c(0.99,0.2))
+```
+
+

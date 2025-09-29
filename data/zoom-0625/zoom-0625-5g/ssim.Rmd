@@ -1,0 +1,61 @@
+---
+title: "Zoom 06/25 5G - SSIM"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0625-5g"
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+```
+
+```{r import}
+ssim <- read_csv(paste(params$experiment_name, "ssim.csv", sep = "-"), col_types="iiin", comment="#")
+```
+
+```{r ssim, fig.height = 3, fig.width = 12}
+ssim %>%
+  filter(ssim > -1) %>%
+  ggplot(aes(x = frame_receive, y = ssim)) +
+    labs(title = "Sent vs. Received Frame SSIM", x = "Frame Index", y = "SSIM") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+
+```{r}
+screen_time <- ssim %>%
+  mutate(
+    run_start = if_else(lag(frame_send, default = 0) - frame_send > 5, 1, 0),
+    run = cumsum(run_start)) %>%
+  select(-run_start)  %>%
+  group_by(frame_send, barcode, run) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  arrange(run, frame_send) %>%
+  mutate(seq = row_number()) %>%
+  mutate(time_on_screen = n / 70) 
+```
+
+```{r time-on-screen-1}
+screen_time %>%
+  ggplot(aes(x = seq, y = time_on_screen * 1000)) +
+    labs(x = "Received Frame Index", y = "Time on Screen [ms]") +
+    scale_x_continuous(expand = c(0.015, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r time-on-screen-2}
+screen_time %>%
+  filter(seq >= 7100 & seq <= 7400) %>%
+  ggplot(aes(x = seq, y = time_on_screen * 1000)) +
+    labs(x = "Received Frame Index", y = "Time on Screen [ms]") +
+    scale_x_continuous(expand = c(0.015, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```

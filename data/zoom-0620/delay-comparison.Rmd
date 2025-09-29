@@ -1,0 +1,79 @@
+---
+title: "Zoom 06/20 - Delay Comparison"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  g5_hi_cross_experiment_name:   "zoom-0620-5g-hi-cross"
+  tc_hi_cross_experiment_name:   "../zoom-0617/zoom-0617-tc-good-static"
+  fig_path: fig/
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+config <- list(
+  "files" = list(
+    "g5_hi_crosss" = list(
+      "join_pkts_up_file" = paste(params$g5_hi_cross_experiment_name, paste(params$g5_hi_cross_experiment_name, "join-pkts-up-seqn.csv", sep = "-"), sep = "/")
+    ),
+    "tc_hi_cross" = list(
+      "join_pkts_up_file" = paste(params$tc_hi_cross_experiment_name, paste("zoom-0617-tc-good-static", "join-pkts-up-seqn.csv", sep = "-"), sep = "/")
+    )
+  ),
+  "single_color" = "dodgerblue4"
+)
+```
+
+```{r import}
+join_pkts_up <- list(
+  "g5_hi_cross" = read_csv(config$files$g5_hi_cross$join_pkts_up_file, col_types="", comment="#"),
+  "tc_hi_cross" = read_csv(config$files$tc_hi_cross$join_pkts_up_file, col_types="", comment="#")
+)
+```
+
+```{r}
+bind_rows(
+  join_pkts_up$g5_hi_cross %>% mutate(type = "5g"),
+  join_pkts_up$tc_hi_cross %>% mutate(type = "tc")
+) %>%
+  ggplot(aes(x = owd_ms, color = type)) +
+    # xlim(-100,200) +
+    stat_ecdf()
+```
+
+```{r}
+bind_rows(
+  join_pkts_up$g5_hi_cross %>% mutate(type = "5g"),
+  join_pkts_up$tc_hi_cross %>% mutate(type = "tc")
+) %>%
+  filter(!is.na(owd_ms) & seq > 5000 & seq < 5500) %>%
+  ggplot(aes(x = seq, y = owd_ms, color = type)) +
+    geom_line()
+```
+
+
+
+
+```{r}
+bind_rows(
+  join_pkts_up$g5_hi_cross %>%
+    select(seq, owd_sender_core, owd_core_receiver, owd_ms) %>%
+    pivot_longer(c(owd_sender_core, owd_core_receiver, owd_ms), names_to="type", values_to="owd_ms"),
+  join_pkts_up$tc_hi_cross %>% 
+    select(seq, owd_ms) %>%
+    mutate(type = "tc")
+) %>%
+  select(owd_ms, seq, type) %>%
+  filter(!is.na(owd_ms)) %>%
+  arrange(seq) %>%
+  slice(5000:8000) %>%
+    ggplot(aes(x = seq, y = owd_ms, color = type)) +
+      ylim(0, NA) +
+      geom_line() +
+      theme_om()
+```
+
+
+

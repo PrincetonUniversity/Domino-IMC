@@ -1,0 +1,512 @@
+---
+title: "Zoom 06/17 - 5G, mobile - One-way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  experiment_name: "zoom-0625-5g"
+---
+
+```{R setup, include=FALSE}
+source("../../r/setup.R")
+
+config <- list(
+  "join_pkts_up_file"  = paste(params$experiment_name, "join-pkts-up.csv", sep = "-"),
+  "ping_sender_file"   = paste(params$experiment_name, "sender-ping.csv", sep = "-"),
+  "ping_core_file"     = paste(params$experiment_name, "core-ping.csv", sep = "-"),
+  "ping_receiver_file" = paste(params$experiment_name, "receiver-ping.csv", sep = "-"),
+  "single_color"       = "dodgerblue4"
+)
+```
+
+```{r import}
+pkts <- read_csv(config$join_pkts_up_file, col_types = "nnfinfinifnniifnnn")
+
+ping_sender <- read_csv(config$ping_sender_file, col_types = "nnffiffni")
+ping_sender %<>% mutate(ts_ms = to_ms(ts_s, ts_us, min(ping_sender$ts_s)))
+
+ping_core <- read_csv(config$ping_core_file, col_types = "nnffiffni") %>%
+  filter(ip_ttl == 63 | ip_ttl == 45)
+ping_core %<>% mutate(ts_ms = to_ms(ts_s, ts_us, min(ping_sender$ts_s)))
+
+ping_receiver <- read_csv(config$ping_receiver_file, col_types = "nnffiffni")
+ping_receiver %<>% mutate(ts_ms = to_ms(ts_s, ts_us, min(ping_sender$ts_s)))
+```
+
+```{r, fig.asp = 0.2}
+pkts %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd_sender_core)) +
+    labs(title = sprintf("RTP One-Way Delay UE \u2192 Core"), x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r sender-core-owd-cdf, fig.height = 3, fig.width = 3}
+pkts %>%
+  ggplot(aes(x = owd_sender_core)) +
+    stat_ecdf()
+```
+
+```{r owd-cdf, fig.height = 1.7, fig.width = 2.4}
+pkts %>%
+  ggplot(aes(x = owd_sender_core, color = media_type)) +
+    labs(x = "RAN Delay [ms] (log.)", y = "CDF") +
+    scale_x_log10() +
+    scale_color_brewer(
+      palette = "Set1",
+      breaks = c("a", "v"),
+      labels = c("Audio","Video")) +
+    stat_ecdf() +
+    annotation_logticks(sides = "b", color = "#333") +
+    theme_om() +
+    theme(
+      legend.position.inside = c(0.97,0.27),
+      legend.title = element_blank())
+```
+
+
+```{r, fig.height = 1.5}
+pkts %>%
+  mutate(ts_s_sender = ts_s_sender - 1719341104, ts_s_core = ts_s_core - 1719341104) %>%
+  filter(ts_s_sender > 0) %>%
+  filter(media_type == "v") %>%
+  select(-media_type) %>%
+  group_by(ssrc, pt, rtp_ts, rtp_ext1_sender) %>%
+  filter(ts_s_sender >= 450 & ts_s_sender <= 465) %>%
+  summarize(ts_s_sender = min(ts_s_sender),
+            min_ts_ms_sender = min(ts_ms_sender), max_ts_ms_sender = max(ts_ms_sender),
+            min_ts_ms_core = min(ts_ms_core), max_ts_ms_core = max(ts_ms_core),
+            pkts = n()) %>%
+  ggplot(aes(x = (min_ts_ms_sender - 14000) / 1000, y = as.factor(rtp_ext1_sender))) +
+    labs(x = "Time at Sender [s]", y = "SVC Layer") +
+    geom_point(size = 0.4) +
+    theme_om()
+```
+
+```{r fig.width = 3, fig.height = 3}
+pkts %>%
+  mutate(ts_s_sender = ts_s_sender - 1719341104, ts_s_core = ts_s_core - 1719341104) %>%
+  filter(ts_s_sender > 0) %>%
+  filter(media_type == "v") %>%
+  select(-media_type) %>%
+  group_by(ssrc, pt, rtp_ts, rtp_ext1_sender) %>%
+  summarize(ts_s_sender = min(ts_s_sender),
+          min_ts_ms_sender = min(ts_ms_sender), max_ts_ms_sender = max(ts_ms_sender),
+          min_ts_ms_core = min(ts_ms_core), max_ts_ms_core = max(ts_ms_core),
+          pkts = n(), bytes = sum(pl_len_sender)) %>%
+  ggplot(aes(x = bytes, color = rtp_ext1_sender)) +
+    labs(x = "Frame Size", y = "CDF", color = "SVC Layer") +
+    stat_ecdf() +
+    xlim(0,10000) +
+    theme_om()
+
+
+# +
+#     scale_color_brewer(
+#       name = "SVC Layer",
+#       palette = "Set1",
+#       breaks = c("0x500000", "0x577777", "0x5ff777"),
+#       labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc."))
+```
+
+
+
+```{r}
+pkts %>%
+  mutate(ts_s_sender = ts_s_sender - 1719341104, ts_s_core = ts_s_core - 1719341104) %>%
+  filter(ts_s_sender > 0) %>%
+  filter(media_type == "v") %>%
+  select(-media_type) %>%
+  group_by(ssrc, pt, rtp_ts, rtp_ext1_sender) %>%
+  summarize(ts_s_sender = min(ts_s_sender),
+            min_ts_ms_sender = min(ts_ms_sender), max_ts_ms_sender = max(ts_ms_sender),
+            min_ts_ms_core = min(ts_ms_core), max_ts_ms_core = max(ts_ms_core),
+            pkts = n()) %>%
+  group_by(rtp_ext1_sender,ts_s_sender) %>%
+  summarize(fps = n()) %>%
+  filter(ts_s_sender >= 440 & ts_s_sender <= 480) %>%
+  ggplot(aes(x = ts_s_sender, y = fps)) +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    ylim(0,15) +
+    labs(x = "Time at Sender [s]", y = "Frame Rate [fps]") +
+    geom_point(size = 0.5) +
+    geom_line() +
+    facet_wrap(~rtp_ext1_sender, ncol = 1) +
+    theme_om()
+```
+
+
+
+```{r}
+frames <- pkts %>%
+  group_by(ts_s_receiver, rtp_ext1_receiver, pt) %>%
+  summarize(pkts = n(), bitrate = (sum(pl_len_receiver) + n() * (14+20+8)), frames = n_distinct(rtp_ts), .groups = "drop") %>%
+  mutate(ts_s = as.integer(ts_s_receiver - 1719341104), rtp_ext1_receiver = as.factor(rtp_ext1_receiver)) %>%
+  select(-ts_s_receiver) %>%
+  filter(!is.na(ts_s)) %>%
+  mutate(rtp_ext1_receiver = if_else(pt == 113, "a", rtp_ext1_receiver))
+```
+```{r}
+ts <- list(
+  min = min(frames$ts_s),
+  max = max(frames$ts_s))
+```
+
+```{r, fig.height = 2, fig.width = 4}
+mask <- tibble(
+  ts_s = rep(seq(ts$min, ts$max), each = 4),
+  rtp_ext1_receiver = rep(c("0x500000", "0x577777", "0x5ff777", "a"), times = 1183),
+  frames = rep(NA, times = 4 * 1183))
+
+frames_na <- left_join(mask, frames, by = join_by(ts_s, rtp_ext1_receiver)) %>%
+  select(-frames.x) %>%
+  rename(frames = frames.y) 
+
+frames_na$rtp_ext1_receiver <- factor(frames_na$rtp_ext1_receiver, levels = c("0x577777", "0x5ff777", "0x500000", "a"))
+
+frames_plot_paper <- frames_na %>%
+  filter(rtp_ext1_receiver != "a") %>%
+  ggplot(aes(x = ts_s, y = frames, fill = rtp_ext1_receiver, color = rtp_ext1_receiver)) +
+    labs(x = element_blank(), y = "Frame Rate [fps]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    scale_y_continuous(expand = c(0.02, 0)) +
+    scale_color_brewer(
+      name = "SVC Layer",
+      palette = "Set1",
+      breaks = c("0x500000", "0x577777", "0x5ff777"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.")) +
+    scale_fill_brewer(
+      name = "SVC Layer",
+      palette = "Pastel1",
+      breaks = c("0x500000", "0x577777", "0x5ff777"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.")) +
+     geom_area(stat="identity", position="stack", linewidth = 0.3, na.rm=FALSE) +
+      theme_om() +
+      theme(legend.position = "none")
+      # theme(legend.position.inside = c(0.99,0.86)) 
+      # geom_line()
+
+```
+
+```{r}
+bitrate_plot_paper <- frames_na %>%
+  ggplot(aes(x = ts_s, y = bitrate * 8 / 1000, fill = rtp_ext1_receiver, color = rtp_ext1_receiver)) +
+    labs(x = element_blank(), y = "Bitrate [Kbps]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    scale_y_continuous(expand = c(0.02, 0)) +
+    scale_color_brewer(
+      name = "SVC Layer",
+      palette = "Set1",
+      breaks = c("0x500000", "0x577777", "0x5ff777", "a"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.", "Audio")) +
+    scale_fill_brewer(
+      name = "SVC Layer",
+      palette = "Pastel1",
+      breaks = c("0x500000", "0x577777", "0x5ff777", "a"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.", "Audio")) +
+     geom_area(stat="identity", position="stack", linewidth = 0.3, na.rm=FALSE) +
+      theme_om() +
+      # theme(legend.position.inside = c(0.99,0.86), legend.direction = "horizontal", legend.title = element_blank()) +
+      theme(legend.position = "top", legend.direction = "horizontal", legend.title = element_blank(), legend.background = element_rect(color = NA))
+  
+```
+
+```{r}
+bitrate_plot_paper
+```
+
+```{r, fig.height = 1.7, fig.width = 4}
+latency_plot_paper <- pkts %>%
+  filter(ts_ms_sender < 1182000) %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd_sender_core)) +
+    labs(x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    scale_y_log10() +
+    geom_line(color = "dodgerblue4") +
+    annotation_logticks(sides = "l", color = "#333") +
+    theme_om()
+```
+
+```{r latency-fps-paper, fig.height = 4.5, fig.width = 4.6}
+cowplot::plot_grid(
+  bitrate_plot_paper,
+  frames_plot_paper,
+  latency_plot_paper,
+  align = "v",
+  ncol = 1,
+  rel_heights = c(2.6,2,1.8)
+)
+
+```
+
+
+```{r latency-full, fig.width = 10, fig.height = 3.5}
+pkts %>%
+  filter(ts_ms_sender < 1182000) %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd_sender_core)) +
+    labs(x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    scale_y_log10() +
+    geom_line(color = "dodgerblue4") +
+    annotation_logticks(sides = "l", color = "#333") +
+    theme_om()
+```
+
+```{r latency-talk, fig.width = 6, fig.asp = 0.35}
+pkts %>%
+  select(ts_ms_sender, owd_sender_core) %>%
+  filter(ts_ms_sender >= 800e3 & ts_ms_sender <= 1100e3) %>%
+  mutate(ts_ms_sender = ts_ms_sender - 800e3) %>%
+  mutate(owd_sender_core_sma = rowMeans(sapply(0:(100 - 1), \(x) lag(owd_sender_core, x)), na.rm = TRUE)) %>%
+  pivot_longer(c("owd_sender_core", "owd_sender_core_sma"), names_to="type", values_to="owd") %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd, color = type)) +
+    labs(x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.025, 0)) +
+    scale_color_manual(values = c("#b8cce1", "dodgerblue4")) +
+    scale_y_log10() +
+    geom_line() +
+    # geom_line(color = "dodgerblue4") +
+    # geom_point() +
+    annotation_logticks(sides = "l", color = "#333") +
+    theme_om() +
+    theme(
+      legend.position = "none"
+    )
+```
+
+
+```{r fps-talk, fig.width = 6, fig.asp = 0.35}
+frames_na %>%
+  filter(rtp_ext1_receiver != "a") %>%
+  filter(ts_s >= 800 & ts_s <= 1100) %>%
+  mutate(ts_s = ts_s - 800) %>%
+  ggplot(aes(x = ts_s, y = frames, fill = rtp_ext1_receiver, color = rtp_ext1_receiver)) +
+    labs(x = element_blank(), y = "Frame Rate [fps]") +
+    scale_x_continuous(expand = c(0.025, 0)) +
+    scale_y_continuous(expand = c(0.02, 0)) +
+    scale_color_brewer(
+      name = "SVC Layer",
+      palette = "Set1",
+      breaks = c("0x500000", "0x577777", "0x5ff777"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.")) +
+    scale_fill_brewer(
+      name = "SVC Layer",
+      palette = "Pastel1",
+      breaks = c("0x500000", "0x577777", "0x5ff777"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.")) +
+     geom_area(stat="identity", position="stack", linewidth = 0.3, na.rm=FALSE) +
+      theme_om() +
+      theme(legend.position = "none")
+```
+```{r bitrate-talk, fig.width = 6, fig.asp = 0.35}
+frames_na %>%
+    filter(ts_s >= 800 & ts_s <= 1100) %>%
+  mutate(ts_s = ts_s - 800) %>%
+  ggplot(aes(x = ts_s, y = bitrate * 8 / 1000, fill = rtp_ext1_receiver, color = rtp_ext1_receiver)) +
+    labs(x = element_blank(), y = "Bitrate [Kbps]") +
+    scale_x_continuous(expand = c(0.025, 0)) +
+    scale_y_continuous(expand = c(0.02, 0)) +
+    scale_color_brewer(
+      name = "SVC Layer",
+      palette = "Set1",
+      breaks = c("0x500000", "0x577777", "0x5ff777", "a"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.", "Audio")) +
+    scale_fill_brewer(
+      name = "SVC Layer",
+      palette = "Pastel1",
+      breaks = c("0x500000", "0x577777", "0x5ff777", "a"),
+      labels = c("Base","Low-FPS Enhanc.", "High-FPS Enhanc.", "Audio")) +
+     geom_area(stat="identity", position="stack", linewidth = 0.3, na.rm=FALSE) +
+      theme_om() +
+      # theme(legend.position.inside = c(0.99,0.86), legend.direction = "horizontal", legend.title = element_blank()) +
+      theme(legend.position = "none", legend.direction = "horizontal", legend.title = element_blank(), legend.background = element_rect(color = NA))
+```
+
+
+
+
+```{r latency-detail-1, fig.width = 10, fig.height = 3.5}
+pkts %>%
+  filter(ts_ms_sender > 50e3 & ts_ms_sender < 52e3) %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd_sender_core)) +
+    labs(x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.03, 0)) +
+    scale_y_continuous(expand = c(0, 1), limits = c(0, 200)) +
+    geom_line(color = "gray") +
+    geom_point(color = "dodgerblue4", size = 1) +
+    theme_om()
+```
+
+```{r latency-detail-2, fig.width = 10, fig.height = 3.5}
+pkts %>%
+  filter(ts_ms_sender > 350e3 & ts_ms_sender < 352e3) %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd_sender_core)) +
+    labs(x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.03, 0)) +
+    scale_y_continuous(expand = c(0, 1), limits = c(0, 200)) +
+    geom_line(color = "gray") +
+    geom_point(color = "dodgerblue4", size = 1) +
+    theme_om()
+```
+
+
+```{r latency-detail-3, fig.width = 10, fig.height = 3.5}
+  pkts %>%
+    filter(ts_ms_sender > 400e3 & ts_ms_sender < 403e3) %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd_sender_core)) +
+    labs(x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.03, 0)) +
+    scale_y_continuous(expand = c(0, 1), limits = c(0, 150)) +
+    geom_line(color = "gray") +
+    geom_point(color = "dodgerblue4", size = 1) +
+    theme_om()
+```
+
+```{r}
+sender_delay <- left_join( # second join
+  # x in second join:
+  left_join(
+    # x in first join:
+    ping_sender %>% filter(icmp_type == 8),
+    # y in first join:
+    ping_core %>% filter(icmp_type == 8),
+    by = join_by(icmp_type, icmp_id, icmp_seq),
+    suffix = c("_sender", "_core")) %>%
+  select(ip_src_sender, ip_dst_sender, ip_src_core, icmp_id, icmp_seq, icmp_type, ts_ms_sender, ts_ms_core) %>%
+  mutate(sender_core_ms = ts_ms_core - ts_ms_sender),
+  
+  # y in second join:
+  ping_sender %>% 
+    select(ts_ms, icmp_type, icmp_id, icmp_seq) %>% 
+    filter(icmp_type == 0),
+  by = join_by(icmp_id, icmp_seq)) %>%
+  
+  select(-c(icmp_type.x, icmp_type.y)) %>%
+  rename(ts_ms_sender_return = ts_ms) %>%
+  mutate(
+    core_sender_ms = ts_ms_sender_return - ts_ms_core,
+    rtt_ms = ts_ms_sender_return - ts_ms_sender,
+    idx = row_number())
+
+receiver_delay <- left_join(
+  ping_receiver %>% filter(icmp_type == 8),
+  ping_receiver %>% filter(icmp_type == 0),
+  by = join_by( icmp_id, icmp_seq),
+  suffix = c("_receiver", "_receiver_return")
+)  %>% mutate(
+  rtt_ms = ts_ms_receiver_return - ts_ms_receiver,
+  idx = row_number())
+```
+```{r rtp-owd-paper, fig.height = 2.2, fig.width = 3.6, warning = FALSE}
+bind_rows(
+  pkts %>%
+    filter(ts_ms_sender > 400e3 & ts_ms_sender < 40333) %>%
+    select(ts_ms_sender, owd_sender_core, owd_ms, owd_core_receiver),
+  sender_delay %>%
+    filter(ts_ms_sender > 400000 & ts_ms_sender < 403000) %>%
+    select(ts_ms_sender, core_sender_ms)) %>%
+  pivot_longer(c(owd_ms, owd_sender_core, owd_core_receiver, core_sender_ms), names_to = "var", values_to = "val") %>%
+  filter(!is.na(val)) %>%
+  ggplot(aes(x = ts_ms_sender / 1000 - 400, y = val, color = var)) +
+    # scale_y_log10(limits = c(6,600)) +
+    labs(x = "Packet Send Time [s]", y = "One-Way Delay [ms]") +
+    scale_color_manual(
+      name = "Leg",
+      values = c("dodgerblue4", "lightblue", "red3", "orange"),
+      breaks = c("owd_ms", "owd_sender_core", "owd_core_receiver", "core_sender_ms"),
+      labels = c(sprintf("RTP 1-2"), sprintf("-"), sprintf("RTP 2-3*-4"), "ICMP 2-3-1")) +
+    # annotation_logticks(sides = "l", color = "#333") +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    ylim(0, 160) +
+    geom_line() +
+    geom_point(size = 0.4) +
+    theme_om() +
+    theme(
+      legend.position.inside = c(0.99, 0.9),
+      legend.title = element_blank(),
+      legend.direction = "horizontal"
+    )
+  
+```
+
+```{r rtp-owd-talk, fig.height = 3, fig.width = 6, warning = FALSE}
+bind_rows(
+  pkts %>%
+    filter(ts_ms_sender > 501e3 & ts_ms_sender < 503e3) %>%
+    select(ts_ms_sender, owd_sender_core, owd_ms, owd_core_receiver),
+  sender_delay %>%
+    filter(ts_ms_sender > 501e3 & ts_ms_sender < 503e3) %>%
+    select(ts_ms_sender, core_sender_ms)) %>%
+  # pivot_longer(c(owd_ms), names_to = "var", values_to = "val") %>%
+  # pivot_longer(c(owd_ms, owd_sender_core, owd_core_receiver), names_to = "var", values_to = "val") %>%
+  pivot_longer(c(owd_ms, owd_sender_core, owd_core_receiver, core_sender_ms), names_to = "var", values_to = "val") %>%
+  filter(!is.na(val)) %>%
+  ggplot(aes(x = ts_ms_sender / 1000 - 501, y = val, color = var)) +
+    # scale_y_log10(limits = c(6,600)) +
+    labs(x = "Packet Send Time [s]", y = "Delay [ms]") +
+    scale_color_manual(
+      name = "Leg",
+      values = c("gray80", "dodgerblue4", "red3", "orange"),
+      breaks = c("owd_ms", "owd_sender_core", "owd_core_receiver", "core_sender_ms"),
+      labels = c(sprintf("RTP 1-2"), sprintf("-"), sprintf("RTP 2-3*-4"), "ICMP 2-3-1")) +
+    # annotation_logticks(sides = "l", color = "#333") +
+    scale_x_continuous(expand = c(0.022, 0)) +
+    scale_y_continuous(expand = c(0.03, 0), limits = c(0, 125)) +
+    geom_line() +
+    geom_point(size = 0.5) +
+    theme_om() +
+    theme(
+      legend.position = "none",
+      legend.position.inside = c(0.99, 0.9),
+      legend.title = element_blank(),
+      legend.direction = "horizontal"
+    )
+  
+```
+
+
+
+```{r}
+ pkts %>%
+    filter(ts_ms_sender > 400000 & ts_ms_sender < 403000) %>%
+    select(ts_ms_sender, owd_ms, owd_core_receiver)
+```
+
+
+```{r}
+pkts %>%
+    filter(ts_ms_sender > 400e3 & ts_ms_sender < 403e3) %>%
+    select(ts_ms_sender, owd_ms, owd_core_receiver)
+```
+
+
+
+```{r rtp-owd-ue-core, fig.asp = 0.2}
+pkts %>%
+  ggplot(aes(x = ts_ms_sender / 1000, y = owd_sender_core)) +
+    labs(title = sprintf("RTP One-Way Delay UE \u2192 Core"), x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    scale_y_log10() +
+    annotation_logticks(sides = "l") +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+
+
+```{r owd-example, fig.asp = 0.2}
+pkts %>%
+  mutate(ts_s_sender = ts_ms_sender / 1000) %>%
+  filter(ts_s_sender > 590 & ts_s_sender < 630) %>%
+  ggplot(aes(x = ts_s_sender, y = owd_sender_core)) +
+    labs(title = sprintf("RTP One-Way Delay UE \u2192 Core"), x = "Time [s]", y = "Delay [ms]") +
+    scale_x_continuous(expand = c(0.01, 0)) +
+    scale_y_log10() +
+    annotation_logticks(sides = "l") +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+

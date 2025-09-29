@@ -1,0 +1,78 @@
+---
+title: "Zoom 05/27 - SSIM"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ssim_file: "zoom-0527-ssim.csv"
+  ue_pkts_file: "zoom-0527-ue-pkts.csv"
+  core_pkts_file: "zoom-0527-core-pkts.csv"
+  ue_frames_file: "zoom-0527-ue-frames.csv"
+  core_frames_file: "zoom-0527-core-frames.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+ssim <- read_csv(params$ssim_file, col_types="iiin", comment="#")
+ue_pkts <- read_csv(params$ue_pkts_file, col_types = "nnfffcicifiniiniff")
+core_pkts <- read_csv(params$core_pkts_file, col_types = "nnfffcicifiniiniff")
+ue_frames <- read_csv(params$ue_frames_file, col_types = "nciciiffnnnnniiiin")
+core_frames <- read_csv(params$core_frames_file, col_types = "nciciiffnnnnniiiin")
+```
+
+```{r}
+ssim %<>%
+  mutate(it = as.integer(cumsum(if_else(frame_send - lag(frame_send, default = 0) < -100, 1, 0)))) %>%
+  mutate(frame_send_seq = as.integer(max(frame_send) * it + frame_send + if_else(it > 0, 1, 0))) %>%
+  mutate(ssim = if_else(ssim == -1, NA, ssim)) %>%
+  mutate(frame_incr = frame_receive - lag(frame_receive)) %>%
+  mutate(frame_incr = if_else(frame_incr == 0, NA, frame_incr))
+```
+
+```{r ssim, fig.width = 9, fig.height = 3}
+ssim %>%
+  filter(!is.na(ssim)) %>%
+  ggplot(aes(x = frame_send_seq, y = ssim)) +
+    labs(x = "Frame Number", y = "SSIM") +
+    geom_line(color = "#377eb8") +
+    theme_om()
+```
+```{r jitter, fig.width = 9, fig.height = 3}
+ue_frames %>%
+  filter(tp_src == 8801 & media_type == 16) %>%
+  mutate(frame_num = row_number()) %>%
+  ggplot(aes(x = frame_num, y = jitter_ms)) +
+    labs(x = "Frame Number", y = "Jitter [ms]") +
+    geom_line(color = "#377eb8") +
+    theme_om()
+```
+
+
+
+```{r fps, fig.width = 9, fig.height = 3}
+ue_frames %>%
+  filter(tp_src == 8801 & media_type == 16) %>%
+  mutate(frame_num = row_number()) %>%
+  ggplot(aes(x = frame_num, y = fps)) +
+    labs(x = "Frame Rate", y = "Frame Number") +
+    geom_line(color = "#377eb8")
+```
+
+```{r frame-size, fig.width = 9, fig.height = 3}
+ue_frames %>%
+  filter(tp_src == 8801 & media_type == 16) %>%
+  mutate(frame_num = row_number()) %>%
+  ggplot(aes(x = frame_num, y = frame_size)) +
+    labs(x = "Frame Number", y = "Frame Size [B]")
+    geom_line(color = "#377eb8") +
+    theme_om()
+```
+

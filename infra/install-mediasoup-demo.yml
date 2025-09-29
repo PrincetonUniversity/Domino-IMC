@@ -1,0 +1,89 @@
+---
+- name: install mediasoup-demo
+  
+  vars:
+    mediasoup_listen_ip: 0.0.0.0
+    mediasoup_announced_ip: 192.168.68.8
+    mediasoup_num_workers: 4 # Object.keys(os.cpus()).length to use num of cpus
+    mediasoup_rtc_min_port: 40000
+    mediasoup_rtc_max_port: 40099
+    cert_common_name: p4-video-nuc.local
+    home_dir: /home/oliver
+  
+  hosts:
+    - sfu
+  
+  tasks:
+
+    - name: install docker
+      become: yes
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: add ~/opt/mediasoup directory
+      ansible.builtin.file:
+        path: "{{home_dir}}/opt/mediasoup"
+        state: directory
+        mode: "0755"
+
+    - name: render configuration file
+      ansible.builtin.template:
+        src: templates/config.js.j2
+        dest: "{{home_dir}}/opt/mediasoup/config.js"
+        owner: "{{ansible_user_id}}"
+
+    - name: check if certificate exists
+      ansible.builtin.stat:
+        path: "{{home_dir}}/opt/mediasoup/fullchain.pem"
+      register: cert
+
+    - name: generate certificate
+      block:
+      - name: create private key
+        community.crypto.openssl_privatekey:
+          path: "{{home_dir}}/opt/mediasoup/privkey.pem"
+
+      - name: create certificate signing request (csr) for self-signed certificate
+        community.crypto.openssl_csr_pipe:
+          privatekey_path: "{{home_dir}}/opt/mediasoup/privkey.pem"
+          common_name: "{{cert_common_name}}"
+          organization_name: Princeton University
+          subject_alt_name:
+            - "IP:{{mediasoup_announced_ip}}"
+        register: csr
+
+      - name: create self-signed certificate from csr
+        community.crypto.x509_certificate:
+          path: "{{home_dir}}/opt/mediasoup/fullchain.pem"
+          csr_content: "{{csr.csr}}"
+          privatekey_path: "{{home_dir}}/opt/mediasoup/privkey.pem"
+          provider: selfsigned
+
+      - name: fetch certificate
+        ansible.builtin.fetch:
+          src: "{{home_dir}}/opt/mediasoup/fullchain.pem"
+          dest: files/
+          flat: true
+    
+      when: cert.stat.exists == false
+      
+    - name: copy required files
+      ansible.builtin.copy:
+        src: "sfu/{{item}}"
+        dest: "{{home_dir}}/opt/mediasoup/{{item}}"
+      loop:
+        - mediasoup.dockerfile
+        - ecosystem.config.js
+
+    - name: build mediasoup image
+      become: yes
+      community.docker.docker_image:
+        name: mediasoup
+        build:
+          path: "{{home_dir}}/opt/mediasoup"
+          dockerfile: "{{home_dir}}/opt/mediasoup/mediasoup.dockerfile"
+        state: present
+        source: build
+        tag: latest

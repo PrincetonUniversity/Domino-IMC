@@ -1,0 +1,568 @@
+---
+title: "Zoom 06/25 5G - Plots for Talk"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+params:
+  experiment_name: "zoom-0625-5g"
+---
+
+```{r, include=FALSE}
+source("../../r/setup.R")
+
+knitr::opts_chunk$set(fig.path = "fig/talk/")
+
+config <- list(
+  "sender_pkts_file"   = paste(params$experiment_name, "sender-pkts.csv", sep = "-"),
+  "receiver_pkts_file" = paste(params$experiment_name, "receiver-pkts.csv", sep = "-"),
+  "tbs_bins_file"      = "bin_tbs.csv",
+  "tbs_raw_file"       = "raw_tbs.csv"
+)
+```
+
+```{r}
+# import sender and receiver packets:
+sender_pkts <- read_csv(config$sender_pkts_file, col_types = "nnfffcicifiniiniff") %>%
+  mutate(dir = if_else(tp_dst == 8801, "u", "d")) %>%
+  select(-c("flow_type", "ip_proto", "ip_src", "tp_src", "ip_dst", "tp_dst", "drop"))
+receiver_pkts <- read_csv(config$receiver_pkts_file, col_types = "nnfffcicifiniiniff") %>%
+  mutate(dir = if_else(tp_src ==  1, "d", "u")) %>%
+  select(-c("flow_type", "ip_proto", "ip_src", "tp_src", "ip_dst", "tp_dst", "drop"))
+tbs_bins <- read_csv(config$tbs_bins_file, col_types = "nn") %>%
+  rename("ts" = "ts_bin", "tbs" = "tbs_bin")
+tbs_raw <- read_csv(config$tbs_raw_file, col_types = "niinn") %>%
+  rename("rtx_delay" = "ReTX_delay")
+```
+
+```{r}
+# convert to relative time stamps:
+base_ts_s <- max(min(sender_pkts$ts_s), min(receiver_pkts$ts_s))
+
+sender_pkts %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_ms = to_ms(ts_s, ts_us, base_ts_s)) %>%
+  select(-c(ts_s, ts_us))
+
+receiver_pkts %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_ms = to_ms(ts_s, ts_us, base_ts_s)) %>%
+  select(-c(ts_s, ts_us))
+
+# packet-level one-way delay:
+pkts_joined <- left_join(
+  sender_pkts %>%
+    select(ssrc, pt, rtp_seq, rtp_ts, rtp_ext1, ts_ms),
+  receiver_pkts %>%
+    select(ssrc, pt, rtp_seq, rtp_ts, rtp_ext1, ts_ms),
+  join_by("ssrc", "pt", "rtp_seq", "rtp_ts", "rtp_ext1"),
+  suffix = c("_sender", "_receiver")) %>%
+  mutate(owd_ms = ts_ms_receiver - ts_ms_sender) %>%
+  filter(!is.na(owd_ms))
+```
+
+## Overview Plots
+
+```{r, fig.width = 8, fig.height = 2.5}
+pkts_joined %>%
+#   filter(ts_ms_sender > 750e3 & ts_ms_sender <= 950e3) %>%
+#   mutate(ts_ms_sender = ts_ms_sender - 750e3) %>%
+  mutate(owd_ms_sma = rowMeans(sapply(0:(100 - 1), \(x) lag(owd_ms, x)), na.rm = TRUE)) %>%
+  pivot_longer(c("owd_ms", "owd_ms_sma"), names_to="type", values_to="owd_ms") %>%
+  ggplot(aes(x = ts_ms_sender / 1e3, y = owd_ms, color = type)) +
+    scale_x_continuous(name = "Time at Sender [s]", expand = c(0.01, 0)) +
+    scale_y_log10(name = "Pkt. One-Way Delay [ms] (log.)", breaks = c(10, 100, 1000), limits = c(10, 4000)) +
+    scale_color_manual(values = c("#b8cce1", "dodgerblue4")) +
+    annotation_logticks(sides = "l", color = "#333") +
+    geom_line() +
+    theme_om() +
+    theme(legend.position = "none")
+```
+
+```{r tbs-per-sec-overview, fig.width = 8, fig.height = 2}
+tbs_bins %>%
+  ggplot(aes(x = ts / 1e3, y = tbs * 10 / 8 / 1000)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "Total TBS/s [KB]", limits = c(0, NA)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r mcs, fig.width = 8, fig.height = 2}
+tbs_raw %>%
+  ggplot(aes(x = ts / 1e3, y = mcs)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "MCS Index", limits = c(0, 30)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r rtx, fig.width = 8, fig.height = 2}
+tbs_raw %>%
+  mutate(rtx_delay = if_else(rtx_delay > 0, rtx_delay, NA)) %>%
+  ggplot(aes(x = ts / 1e3, y = rtx_delay)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "Re-Tx. Delay [ms]", limits = c(0, NA)) +
+    geom_point(color = "dodgerblue4", size = 0.5) +
+    theme_om()
+```
+
+```{r}
+fps_mask <- cross_join(
+  pkts_joined %>%
+    filter(pt == 98) %>%
+      # filter(ts_ms_sender > 740e3 & ts_ms_sender <= 950e3) %>%
+    group_by(ssrc, pt, rtp_ts, rtp_ext1) %>%
+    summarize(.groups = "drop"),
+  tibble(rtp_ext1 = as.factor(c("0x500000", "0x577777", "0x5ff777")))
+) %>%
+  rename(rtp_ext1 = rtp_ext1.y) %>%
+  select(-rtp_ext1.x)
+
+fps_expanded <- left_join(
+  fps_mask,
+  pkts_joined %>%
+    filter(pt == 98) %>%
+      # filter(ts_ms_sender > 740e3 & ts_ms_sender <= 950e3,) %>%
+    group_by(ssrc, pt, rtp_ts, rtp_ext1) %>%
+    summarize(n = n(), min_ts_ms_receiver= min(ts_ms_receiver), .groups = "drop"),
+  by = join_by(ssrc, pt, rtp_ts, rtp_ext1)
+) %>%
+  group_by(ssrc, pt, rtp_ts, rtp_ext1) %>%
+  summarize(n = n, min_ts_ms_receiver = min_ts_ms_receiver, .groups = "drop") %>%
+  fill(min_ts_ms_receiver, .direction = "downup") %>%
+  mutate(n = if_else(is.na(n), 0, n), seen = as.integer(if_else(n > 0, 1, 0)))
+
+fps <- bind_rows(
+  fps_expanded %>%
+    ungroup() %>%
+    filter(rtp_ext1 == "0x500000") %>%
+    mutate(frame_rate = map_int(min_ts_ms_receiver, 
+      ~ sum(seen[min_ts_ms_receiver >= (.x - 1000) & min_ts_ms_receiver <= .x]))) %>%
+    select(-seen),
+  fps_expanded %>%
+    ungroup() %>%
+    filter(rtp_ext1 == "0x577777") %>%
+    mutate(frame_rate = map_int(min_ts_ms_receiver, 
+      ~ sum(seen[min_ts_ms_receiver >= (.x - 1000) & min_ts_ms_receiver <= .x]))) %>%
+    select(-seen),
+  fps_expanded %>%
+    ungroup() %>%
+    filter(rtp_ext1 == "0x5ff777") %>%
+    mutate(frame_rate = map_int(min_ts_ms_receiver, 
+      ~ sum(seen[min_ts_ms_receiver >= (.x - 1000) & min_ts_ms_receiver <= .x]))) %>%
+    select(-seen)
+) %>%
+  select(min_ts_ms_receiver, rtp_ext1, frame_rate) 
+```
+
+```{r}
+# pkts_joined %>%
+#   filter(ts_ms_sender >= window1$config$min * 1e3 & 
+#     ts_ms_sender <= window1$config$max * 1e3) %>%
+#   filter(pt == 113) %>%
+#   group_by(rtp_ts) %>%
+#   summarize(ts_ms_sender = min(ts_ms_sender), ts_ms_receiver = max(ts_ms_receiver), n = n(),
+#             .groups = "drop") %>%
+#   mutate(sample_rate = map_int(ts_ms_receiver, 
+#       ~ sum(n[ts_ms_receiver >= (.x - 1000) & ts_ms_receiver <= .x]))) %>%
+#   ggplot(aes(x = ts_ms_sender, y = sample_rate)) +
+#     geom_line()
+```
+
+
+
+
+## HotNets Figures
+
+```{r overview, fig.width = 10, fig.height = 5}
+fps_plot_config = list(
+  layer_line_colors = c("darkred", "seagreen", "dodgerblue4"),
+  layer_fill_colors = c("#f9a39e", "#c2e8b9", "#b8cce1"),
+  svc_layers        = c("0x577777", "0x5ff777", "0x500000"),
+  svc_layer_labels  = c("Low-FPS Enhanc.", "High-FPS Enhanc.", "Base")
+)
+
+overview_plot = list(fps = NA, lat = NA)
+
+overview_plot$fps <- fps %>%
+  ggplot(aes(x = min_ts_ms_receiver / 1000, y = frame_rate, 
+    color = fct_relevel(rtp_ext1, "0x577777", "0x5ff777", "0x500000"),
+    fill  = fct_relevel(rtp_ext1, "0x577777", "0x5ff777", "0x500000"))) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "Frame Rate [fps]", limits = c(0, 30)) +
+    scale_color_manual(
+      name = "SVC Layer",
+      values = fps_plot_config$layer_line_colors,
+      breaks = fps_plot_config$svc_layers,
+      labels = fps_plot_config$svc_layer_labels) +
+    scale_fill_manual(
+      name = "SVC Layer",
+      values = fps_plot_config$layer_fill_colors,
+      breaks = fps_plot_config$svc_layers,
+      labels = fps_plot_config$svc_layer_labels) +
+    geom_area(position="stack", linewidth = 0.3) +
+    theme_om() +
+    theme(
+      legend.direction = "horizontal",
+      legend.position.inside  = c(0.98, 0.15),
+      axis.title.x=element_blank(),
+      axis.text.x=element_blank(),
+      axis.ticks.x=element_blank())
+
+overview_plot$lat <- pkts_joined %>%
+  mutate(owd_ms_sma = rowMeans(sapply(0:(100 - 1), \(x) lag(owd_ms, x)), na.rm = TRUE)) %>%
+  pivot_longer(c("owd_ms", "owd_ms_sma"), names_to="type", values_to="owd_ms") %>%
+  ggplot(aes(x = ts_ms_sender / 1e3, y = owd_ms, color = type)) +
+    scale_x_continuous(name = "Time at Sender [s]", expand = c(0.01, 0)) +
+    scale_y_log10(name = "Pkt. One-Way Delay [ms] (log.)", breaks = c(10, 100, 1000),
+                  limits = c(10, 4000)) +
+    scale_color_manual(values = c("#b8cce1", "dodgerblue4")) +
+    annotation_logticks(sides = "l", color = "#333") +
+    geom_line() +
+    theme_om() +
+    theme(legend.position = "none")
+
+cowplot::plot_grid(
+  overview_plot$fps,
+  overview_plot$lat,
+  align = "v",
+  ncol = 1,
+  rel_heights = c(1, 1)
+)
+
+```
+```{r}
+# fps %>%
+#   filter(min_ts_ms_receiver >= 285.5 * 1e3 & 
+#          min_ts_ms_receiver <= 287 * 1e3) %>%
+#   arrange(min_ts_ms_receiver) %>%
+#   ggplot(aes(x = min_ts_ms_receiver, y = frame_rate)) +
+#     geom_point()
+```
+
+```{r window1, fig.width = 8, fig.height = 5}
+window1 = list(
+  config = list(min = 250, max = 310),
+  fps_plot = NA,
+  tbs_plot = NA,
+  mcs_plot = NA,
+  prb_plot = NA,
+  lat_plot = NA,
+  rtx_plot = NA
+)
+
+# fps plot:
+
+window1$fps_plot <- fps %>%
+  filter(min_ts_ms_receiver >= window1$config$min * 1e3 & 
+         min_ts_ms_receiver <= window1$config$max * 1e3) %>%
+  bind_rows(
+    tibble(
+      min_ts_ms_receiver = c(286000, 286000, 286750, 286750),
+      rtp_ext1 = c("0x500000", "0x577777", "0x500000", "0x577777"),
+      frame_rate = c(1, 1, 1, 1))
+  ) %>%
+  ggplot(aes(x = min_ts_ms_receiver / 1000, y = frame_rate, 
+    color = fct_relevel(rtp_ext1, "0x577777", "0x5ff777", "0x500000"),
+    fill  = fct_relevel(rtp_ext1, "0x577777", "0x5ff777", "0x500000"))) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "Frame Rate [fps]", limits = c(0, 32)) +
+    scale_color_manual(
+      name = "SVC Layer",
+      values = fps_plot_config$layer_line_colors,
+      breaks = fps_plot_config$svc_layers,
+      labels = fps_plot_config$svc_layer_labels) +
+    scale_fill_manual(
+      name = "SVC Layer",
+      values = fps_plot_config$layer_fill_colors,
+      breaks = fps_plot_config$svc_layers,
+      labels = fps_plot_config$svc_layer_labels) +
+    geom_area(position="stack", linewidth = 0.3) +
+    theme_om() +
+    theme(
+      axis.title.x=element_blank(),
+      legend.title = element_blank(),
+      legend.direction = "horizontal",
+      legend.position.inside  = c(0.99, 0.85),
+      axis.text.x=element_blank(),
+      axis.ticks.x=element_blank())
+
+# latency plot:
+
+window1$lat_plot <- pkts_joined %>%
+  filter(ts_ms_sender >= window1$config$min * 1e3 & 
+       ts_ms_sender <= window1$config$max * 1e3) %>%
+  mutate(owd_ms_sma = rowMeans(sapply(0:(100 - 1), \(x) lag(owd_ms, x)), na.rm = TRUE)) %>%
+  pivot_longer(c("owd_ms", "owd_ms_sma"), names_to="type", values_to="owd_ms") %>%
+  ggplot(aes(x = ts_ms_sender / 1e3, y = owd_ms, color = type)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.015, 0)) +
+    scale_y_log10(name = "Delay [ms] (log.)", breaks = c(10, 100, 1000), limits = c(10, 5000)) +
+    scale_color_manual(values = c("#b8cce1", "dodgerblue4")) +
+    annotation_logticks(sides = "l", color = "#333") +
+    geom_line() +
+    theme_om() +
+    theme(legend.position = "none") +
+    theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+# tbs plot:
+
+window1$tbs_plot <- tbs_bins %>%
+  filter(ts >= window1$config$min * 1e3 & ts <= window1$config$max * 1e3) %>%
+  ggplot(aes(x = ts / 1e3, y = tbs * 10 / 8 / 1000)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.015, 0)) +
+    scale_y_continuous(name = "TBS/s [KB]", limits = c(0, NA)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om() +
+    theme(axis.title.x=element_blank(),
+      axis.text.x=element_blank(),
+      axis.ticks.x=element_blank())
+
+# mcs plot:
+
+window1$mcs_plot <- tbs_raw %>%
+  filter(ts >= window1$config$min * 1e3 & ts <= window1$config$max * 1e3) %>%
+  ggplot(aes(x = ts / 1e3, y = mcs)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.015, 0)) +
+    scale_y_continuous(name = "MCS", limits = c(0, NA)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om() +
+    theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+# prb plot:
+
+# window1$prb_plot <- tbs_raw %>%
+#   filter(ts >= window1$config$min * 1e3 & ts <= window1$config$max * 1e3) %>%
+#   ggplot(aes(x = ts / 1e3, y = prb)) +
+#     scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+#     scale_y_continuous(name = "PRBs", limits = c(0, NA)) +
+#     geom_line(color = "dodgerblue4") +
+#     theme_om()
+
+window1$prb_plot <- tbs_raw %>%
+  filter(ts >= window1$config$min * 1e3 & ts <= window1$config$max * 1e3) %>%
+    mutate(ts_bin = floor(ts / 1e3)) %>%
+    group_by(ts_bin) %>%
+    summarize(prb_median = median(prb), prb_min = min(prb), prb_max = max(prb)) %>%
+    ggplot(aes(x = ts_bin, y = prb_median, ymin = prb_min, ymax = prb_max)) +
+      scale_x_continuous(name = "Time [s]", expand = c(0.015, 0),
+                         limits = c(window1$config$min, window1$config$max)) +
+      scale_y_continuous(name = "PRB/s", limits = c(0, NA)) +
+      # geom_segment(linewidth = 1.25, color = "dodgerblue4") +
+      # geom_rect(xmin = 260, xmax = 280, ymin = 0, ymax = 50, fill = "#f7c1c1", alpha = 0.01) +
+      geom_pointrange(color = "dodgerblue4", size = 0.2, shape = 5) +
+      theme_om() +
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank())
+
+# rtx plot:
+
+window1$rtx_plot <- tbs_raw %>%
+  filter(ts >= window1$config$min * 1e3 & ts <= window1$config$max * 1e3) %>%
+  filter(rtx_delay > 0) %>%
+  ggplot(aes(x = ts / 1e3, y = rtx_delay)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.015, 0), 
+                       minor_breaks = seq(window1$config$min, window1$config$max, 1)) +
+    scale_y_continuous(name = "RTX [ms]", limits = c(7, 32), breaks = c(10, 20, 30)) +
+    geom_point(color = "dodgerblue4", size = 0.5) +
+    theme_om()
+
+cowplot::plot_grid(
+  window1$fps_plot,
+  window1$lat_plot,
+  # window1$tbs_plot,
+  # window1$mcs_plot,
+  window1$prb_plot,
+  window1$rtx_plot,
+  align = "v",
+  ncol = 1,
+  rel_heights = c(1.2,1.2,0.7,0.7,0.8)
+)
+
+
+# plot prbs, highlight if zoom had prb information it could make better choice 
+# two separate delays for zoom adapt and then cell adapt
+# highlight area after addition of cross traffic to when zoom reacts and then to when cell changes scheduling
+
+```
+
+```{r fig.width = 8, fig.height = 6}
+cowplot::plot_grid(
+  tbs_raw %>%
+    filter(ts >= 250 * 1e3 & ts <= 300 * 1e3) %>%
+    ggplot(aes(x = ts / 1e3, y = prb)) +
+      scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+      scale_y_continuous(name = "PRBs", limits = c(0, NA)) +
+      geom_line(color = "dodgerblue4") +
+      theme_om() +
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank()),
+  tbs_raw %>%
+    filter(ts >= 250 * 1e3 & ts <= 300 * 1e3) %>%
+    mutate(ts_bin = floor(ts / 1e3 / 0.1) * 0.1) %>%
+    group_by(ts_bin) %>%
+    summarize(prb = sum(prb) * 10) %>%
+    ggplot(aes(x = ts_bin, y = prb)) +
+      scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+      scale_y_continuous(name = "PRBs/s", limits = c(0, NA)) +
+      geom_line(color = "dodgerblue4") +
+      theme_om() +
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank()),
+  tbs_raw %>%
+    filter(ts >= 250 * 1e3 & ts <= 300 * 1e3) %>%
+    mutate(ts_bin = floor(ts / 1e3)) %>%
+    group_by(ts_bin) %>%
+    summarize(prb_median = median(prb), prb_min = min(prb), prb_max = max(prb)) %>%
+    ggplot(aes(x = ts_bin, y = prb_median, ymin = prb_min, ymax = prb_max)) +
+      scale_x_continuous(name = "Time [s]", expand = c(0.01, 0), limits = c(250, 300)) +
+      scale_y_continuous(name = "PRBs/s", limits = c(0, NA)) +
+      # geom_segment(linewidth = 1.25, color = "dodgerblue4") +
+      geom_rect(xmin = 260, xmax = 280, ymin = 0, ymax = 50, fill = "red", alpha = 0.01) +
+    
+          geom_pointrange(color = "dodgerblue4", size = 0.2, shape = 5) +
+
+      theme_om() +
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank()),
+  tbs_raw %>%
+    filter(ts >= 250 * 1e3 & ts <= 300 * 1e3) %>%
+    mutate(ts_bin = floor(ts / 1e3)) %>%
+    group_by(ts_bin) %>%
+    summarize(prb = sum(prb)) %>%
+    ggplot(aes(x = ts_bin, y = 0, yend = prb)) +
+      scale_x_continuous(name = "Time [s]", expand = c(0.01, 0), limits = c(250, 300)) +
+      scale_y_continuous(name = "PRBs/s", limits = c(0, NA)) +
+      geom_segment(linewidth = 1.25, color = "dodgerblue4") +
+      theme_om(),
+  align = "v",
+  ncol = 1
+)
+```
+
+
+
+
+```{r window2, fig.width = 8, fig.height = 10}
+window2 = list(
+  config = list(min = 900, max = 1200),
+  fps_plot = NA,
+  tbs_plot = NA,
+  mcs_plot = NA,
+  prb_plot = NA,
+  lat_plot = NA,
+  rtx_plot = NA
+)
+
+# fps plot:
+
+window2$fps_plot <- fps %>%
+  filter(min_ts_ms_receiver >= window2$config$min * 1e3 & 
+         min_ts_ms_receiver <= window2$config$max * 1e3) %>%
+  ggplot(aes(x = min_ts_ms_receiver / 1000, y = frame_rate, 
+    color = fct_relevel(rtp_ext1, "0x577777", "0x5ff777", "0x500000"),
+    fill  = fct_relevel(rtp_ext1, "0x577777", "0x5ff777", "0x500000"))) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "Frame Rate [fps]", limits = c(0, 30)) +
+    scale_color_manual(
+      name = "SVC Layer",
+      values = fps_plot_config$layer_line_colors,
+      breaks = fps_plot_config$svc_layers,
+      labels = fps_plot_config$svc_layer_labels) +
+    scale_fill_manual(
+      name = "SVC Layer",
+      values = fps_plot_config$layer_fill_colors,
+      breaks = fps_plot_config$svc_layers,
+      labels = fps_plot_config$svc_layer_labels) +
+    geom_area(position="stack", linewidth = 0.2) +
+    theme_om() +
+    theme(
+      legend.direction = "horizontal",
+      legend.position  = c(0.98, 0.15)
+    )
+
+# latency plot:
+
+window2$lat_plot <- pkts_joined %>%
+  filter(ts_ms_sender >= window2$config$min * 1e3 & 
+       ts_ms_sender <= window2$config$max * 1e3) %>%
+  mutate(owd_ms_sma = rowMeans(sapply(0:(100 - 1), \(x) lag(owd_ms, x)), na.rm = TRUE)) %>%
+  pivot_longer(c("owd_ms", "owd_ms_sma"), names_to="type", values_to="owd_ms") %>%
+  ggplot(aes(x = ts_ms_sender / 1e3, y = owd_ms, color = type)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_log10(name = "Pkt. One-Way Delay [ms] (log.)", breaks = c(10, 100, 1000), limits = c(10, 4000)) +
+    scale_color_manual(values = c("#b8cce1", "dodgerblue4")) +
+    annotation_logticks(sides = "l", color = "#333") +
+    geom_line() +
+    theme_om() +
+    theme(legend.position = "none")
+
+# tbs plot:
+
+window2$tbs_plot <- tbs_bins %>%
+  filter(ts >= window2$config$min * 1e3 & ts <= window2$config$max * 1e3) %>%
+  ggplot(aes(x = ts / 1e3, y = tbs * 10 / 8 / 1000)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "Total TBS/s [KB]", limits = c(0, NA)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+
+window2$prb_plot <- tbs_raw %>%
+  filter(ts >= window2$config$min * 1e3 & ts <= window2$config$max * 1e3) %>%
+    mutate(ts_bin = floor(ts / 1e3)) %>%
+    group_by(ts_bin) %>%
+    summarize(prb_median = median(prb), prb_min = min(prb), prb_max = max(prb)) %>%
+    ggplot(aes(x = ts_bin, y = prb_median, ymin = prb_min, ymax = prb_max)) +
+      scale_x_continuous(name = "Time [s]", expand = c(0.015, 0),
+                         limits = c(window2$config$min, window2$config$max)) +
+      scale_y_continuous(name = "PRB/s", limits = c(0, NA)) +
+      # geom_segment(linewidth = 1.25, color = "dodgerblue4") +
+      # geom_rect(xmin = 260, xmax = 280, ymin = 0, ymax = 50, fill = "#f7c1c1", alpha = 0.01) +
+      geom_pointrange(color = "dodgerblue4", size = 0.2, shape = 5) +
+      theme_om() +
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank())
+
+# mcs plot:
+
+window2$mcs_plot <- tbs_raw %>%
+  filter(ts >= window2$config$min * 1e3 & ts <= window2$config$max * 1e3) %>%
+  ggplot(aes(x = ts / 1e3, y = mcs)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "MCS Index", limits = c(0, 30)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+
+# rtx plot:
+
+window2$rtx_plot <- tbs_raw %>%
+  filter(ts >= window2$config$min * 1e3 & ts <= window2$config$max * 1e3) %>%
+  filter(rtx_delay > 0) %>%
+  ggplot(aes(x = ts / 1e3, y = rtx_delay)) +
+    scale_x_continuous(name = "Time [s]", expand = c(0.01, 0)) +
+    scale_y_continuous(name = "Re-Tx. Delay [ms]", limits = c(0, NA)) +
+    geom_point(color = "dodgerblue4", size = 0.5) +
+    theme_om()
+
+cowplot::plot_grid(
+  window2$fps_plot,
+  window2$lat_plot,
+  window2$tbs_plot,
+  window2$mcs_plot,
+  window2$prb_plot,
+  window2$rtx_plot,
+  align = "v",
+  ncol = 1,
+  rel_heights = c(1.5,1,1,1,1,1)
+)
+```

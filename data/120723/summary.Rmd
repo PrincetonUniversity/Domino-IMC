@@ -1,0 +1,157 @@
+---
+title: "WebRTC Cellular 12/07 Experiment: Summary"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ue_data_file: "120723-ue.csv"
+  sfu_data_file: "120723-sfu.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+pkts_ue <- read_csv(params$ue_data_file, col_types="") %>%
+  mutate(
+    rtp_ssrc = as.factor(rtp_ssrc),
+    rtp_pt = as.factor(rtp_pt),
+    dir = as.factor(if_else(ip_src == "192.168.0.20", "tx", "rx")),
+    rtp_tw_seq = if_else(is.na(rtp_tw_seq3), rtp_tw_seq5, rtp_tw_seq3)
+  ) %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst) %>%
+  select(-c(encap, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ip_ttl,
+            rtp_tw_seq3, rtp_tw_seq5)) %>%
+  mutate(flow_id = as.factor(cur_group_id()))
+
+pkts_sfu <- read_csv(params$sfu_data_file, col_types="") %>%
+  mutate(
+    rtp_ssrc = as.factor(rtp_ssrc),
+    rtp_pt = as.factor(rtp_pt),
+    dir = as.factor(if_else(ip_src == "192.168.68.8", "tx", "rx")),
+    rtp_tw_seq = if_else(is.na(rtp_tw_seq3), rtp_tw_seq5, rtp_tw_seq3)
+  ) %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst) %>%
+  select(-c(encap, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ip_ttl,
+            rtp_tw_seq3, rtp_tw_seq5)) %>%
+  mutate(flow_id = as.factor(cur_group_id()))
+
+start_ts_s <- max(c(min(pkts_sfu$ts_s), min(pkts_ue$ts_s)))
+
+pkts_ue %<>%
+  filter(ts_s >= start_ts_s) %>%
+  mutate(ts_s = ts_s - start_ts_s) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, ts_us)) %>%
+  relocate(ts_ms, dir, flow_id)
+
+pkts_sfu %<>%
+  filter(ts_s >= start_ts_s) %>%
+  mutate(ts_s = ts_s - start_ts_s) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, ts_us)) %>%
+  relocate(ts_ms, dir, flow_id)
+```
+
+```{r}
+streams_ue <- pkts_ue %>%
+  filter(rtp_ssrc != 1234) %>%
+  group_by(ip_src, ip_dst, rtp_ssrc, rtp_pt) %>%
+  summarize(n = n(), min_ts_ms = min(ts_ms), max_ts_ms = max(ts_ms), .groups = "drop") %>%
+  mutate(dir = as.factor(if_else(ip_src == "192.168.0.20", "tx", "rx"))) %>%
+  arrange(min_ts_ms)
+
+streams_sfu <- pkts_sfu %>%
+  filter(rtp_ssrc != 1234) %>%
+  group_by(ip_src, ip_dst,rtp_ssrc, rtp_pt) %>%
+  summarize(n = n(), min_ts_ms = min(ts_ms), max_ts_ms = max(ts_ms), .groups = "drop") %>%
+  mutate(dir = as.factor(if_else(ip_src == "192.168.68.8", "tx", "rx"))) %>%
+  arrange(min_ts_ms)
+```
+
+**Send RTP PTs:**
+
+Video: VP8 at 90 kHz with Simulcast + RTX
+* main PT = 96
+* RTX PT = 97
+
+Audio: Opus at 48 kHz with in-band FEC
+* main PT = 111
+
+**Receive RTP PTs:**
+
+Video: VP8 at 90 kHz with RTX
+* main PT  = 101 (?)
+* RTX PT = 102 (?)
+Audio: Opus at 48 kHz with in-band FEC
+* main PT = 100 (?)
+
+```{r ue-rx-streams}
+streams_ue %>%
+  filter(dir == "rx") %>%
+  mutate(min_ts_s = min_ts_ms / 1e3, max_ts_s = max_ts_ms / 1e3) %>%
+  ggplot(aes(x = min_ts_s, xend = max_ts_s, y = rtp_ssrc, yend = rtp_ssrc, color = rtp_pt)) +
+    labs(title = "Received RTP Streams at UE", x = "Time [s]", y = "RTP SSRC", color = "RTP PT") +
+    geom_segment(linewidth = 1.25) +
+    theme_om() +
+    theme(
+      strip.background = element_rect(color="white", fill="white"),
+      strip.text.x = element_text(size = 10, face = "bold")
+    )
+```
+
+```{r ue-tx-streams}
+streams_ue %>%
+  filter(dir == "tx") %>%
+  mutate(min_ts_s = min_ts_ms / 1e3, max_ts_s = max_ts_ms / 1e3) %>%
+  ggplot(aes(x = min_ts_s, xend = max_ts_s, y = rtp_ssrc, yend = rtp_ssrc, color = rtp_pt)) +
+    labs(title = "Sent RTP Streams at UE", x = "Time [s]", y = "RTP SSRC", color = "RTP PT") +
+    geom_segment(linewidth = 1.25) +
+    theme_om() +
+    theme(
+      strip.background = element_rect(color="white", fill="white"),
+      strip.text.x = element_text(size = 10, face = "bold")
+    )
+```
+
+
+```{r ue-txrx-pkts-ts}
+pkts_ue %>%
+  mutate(ts_s = as.integer(ts_ms / 1000)) %>%
+  group_by(ts_s) %>%
+  summarize(dir = dir, flow_id = flow_id, pkts = n(), .groups = "drop") %>%
+  ggplot(aes(x = ts_s, y = pkts, color = flow_id)) +
+    labs(title = "Packets Received/Sent by IP-5T Flow", x = "Time [s]", y = "Packets/s", color = "Flow") +
+    geom_line() +
+    facet_wrap(~dir,  ncol=1) +
+    theme_om() +
+    theme(
+      legend.direction = "horizontal",
+      legend.position = c(0.5, 0.1)
+    )
+```
+
+```{r ue-txrx-bytes-ts}
+pkts_ue %>%
+  mutate(ts_s = as.integer(ts_ms / 1000)) %>%
+  group_by(ts_s) %>%
+  summarize(dir = dir, flow_id = flow_id, bytes = sum(frame_len) * 8 / 1000) %>%
+  ggplot(aes(x = ts_s, y = bytes, color = flow_id)) +
+    labs(title = "Data Rate Received/Sent by IP-5T Flow",x = "Time [s]", y = "Data Rate [KBit/s]", color = "Flow") +
+    geom_line() +
+    facet_wrap(~dir,  ncol=1) +
+    theme_om() +
+    theme(
+      legend.direction = "horizontal",
+      legend.position = c(0.5, 0.1)
+    )
+```
+
+
+

@@ -1,0 +1,280 @@
+---
+title: "WebRTC Cellular 12/07 Experiment: Summary"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ue_data_file: "120723-ue.csv"
+  sfu_data_file: "120723-sfu.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+pkts_ue <- read_csv(params$ue_data_file, col_types="") %>%
+  mutate(
+    rtp_ssrc = as.factor(rtp_ssrc),
+    rtp_pt = as.factor(rtp_pt),
+    dir = as.factor(if_else(ip_src == "192.168.0.20", "tx", "rx")),
+    rtp_tw_seq = if_else(is.na(rtp_tw_seq3), rtp_tw_seq5, rtp_tw_seq3)
+  ) %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst) %>%
+  select(-c(encap, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ip_ttl,
+            rtp_tw_seq3, rtp_tw_seq5)) %>%
+  mutate(flow_id = as.factor(cur_group_id()))
+
+pkts_sfu <- read_csv(params$sfu_data_file, col_types="") %>%
+  mutate(
+    rtp_ssrc = as.factor(rtp_ssrc),
+    rtp_pt = as.factor(rtp_pt),
+    dir = as.factor(if_else(ip_src == "192.168.68.8", "tx", "rx")),
+    rtp_tw_seq = if_else(is.na(rtp_tw_seq3), rtp_tw_seq5, rtp_tw_seq3)
+  ) %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst) %>%
+  select(-c(encap, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst, ip_ttl,
+            rtp_tw_seq3, rtp_tw_seq5)) %>%
+  mutate(flow_id = as.factor(cur_group_id()))
+
+start_ts_s <- max(c(min(pkts_sfu$ts_s), min(pkts_ue$ts_s)))
+
+pkts_ue %<>%
+  filter(ts_s >= start_ts_s) %>%
+  mutate(ts_s = ts_s - start_ts_s) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, ts_us)) %>%
+  relocate(ts_ms, dir, flow_id) %>%
+  ungroup() %>%
+  select(-c(ip_src, ip_dst, udp_src, udp_dst))
+
+pkts_sfu %<>%
+  filter(ts_s >= start_ts_s) %>%
+  mutate(ts_s = ts_s - start_ts_s) %>%
+  mutate(ts_ms = ts_s * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, ts_us)) %>%
+  relocate(ts_ms, dir, flow_id) %>%
+  ungroup() %>%
+  select(-c(ip_src, ip_dst, udp_src, udp_dst))
+
+one_way_delay <- left_join(pkts_ue, pkts_sfu,
+  join_by(rtp_seq, rtp_ts, rtp_tw_seq), suffix = c("_ue", "_sfu")) %>%
+  filter(!is.na(dir_sfu) & !is.na(dir_ue)) %>% # removed observations that did not get joined
+  select(-c(flow_id_sfu,rtp_ssrc_sfu,rtp_pt_sfu,frame_len_sfu,media_len_sfu)) %>%
+  mutate(one_way_ms = if_else(dir_ue == "tx", ts_ms_sfu - ts_ms_ue, ts_ms_ue - ts_ms_sfu)) %>%
+  relocate(
+    ts_ms_ue, ts_ms_sfu, one_way_ms,
+    flow_id_ue, dir_ue, dir_sfu,
+    rtp_ssrc = rtp_ssrc_ue, rtp_pt = rtp_pt_ue, rtp_seq, rtp_ts, rtp_tw_seq,
+    frame_len = frame_len_ue, media_len = media_len_ue)
+```
+
+# Sequence Numbers
+
+```{r seq-no, fig.width=9, fig.height = 2.2}
+pkts_ue %>%
+  mutate(ts_s = ts_ms / 1e3) %>%
+  ggplot(aes(x = ts_s, y = rtp_tw_seq, color = flow_id)) +
+    labs(title = "Google CC Sequence Number by Flow", x = "Time [s]", y = "GCC Sequence No.") +
+    geom_line() +
+    theme_om() +
+    theme(legend.position = "none")
+```
+
+# Analyze Inter-send/arrival times
+
+```{r}
+# define direction and start and duration in milliseconds:
+inter_pkt_up_config = list(start = 60000, len  = 60000)
+
+inter_pkt_up <- one_way_delay %>%
+  filter(dir_ue == "tx" & ts_ms_ue >= inter_pkt_up_config$start &
+        ts_ms_ue < inter_pkt_up_config$start + inter_pkt_up_config$len) %>%
+  select(ts_ms_ue, ts_ms_sfu) %>%
+  mutate(tx_inter_pkt = ts_ms_ue - lag(ts_ms_ue),
+         rx_inter_pkt = ts_ms_sfu - lag(ts_ms_sfu))
+```
+
+```{r inter-pkt-up, fig.height=3, fig.width=4}
+inter_pkt_up %>%
+  pivot_longer(c("tx_inter_pkt", "rx_inter_pkt"), names_to="var", values_to="val") %>%
+  ggplot(aes(x = val, color = var)) +
+    labs(title = "RTP Uplink Inter-Pkt. Spacing (1 min)", x = "Inter-Pkt. Spacing [ms]", 
+         y = "CDF") +
+    scale_x_continuous(breaks = seq(0, 35, 5), limits = c(0, 35)) +
+    scale_color_manual(breaks = c("tx_inter_pkt", "rx_inter_pkt"), labels = c("Send", "Receive"),
+                       name = "Type", values = brewer.pal(n = 3, name = "Set1")) +
+    stat_ecdf() +
+    theme_om()
+```
+
+```{r}
+# define direction and start and duration in milliseconds:
+inter_pkt_down_config = list(start = 60000, len  = 60000)
+
+inter_pkt_down <- one_way_delay %>%
+  filter(dir_ue == "rx" & ts_ms_ue >= inter_pkt_down_config$start &
+        ts_ms_ue < inter_pkt_down_config$start + inter_pkt_down_config$len) %>%
+  select(ts_ms_ue, ts_ms_sfu) %>%
+  mutate(rx_inter_pkt = ts_ms_ue - lag(ts_ms_ue),
+         tx_inter_pkt = ts_ms_sfu - lag(ts_ms_sfu))
+```
+
+```{r inter-pkt-down, fig.height=3, fig.width=4}
+inter_pkt_down %>%
+  pivot_longer(c("tx_inter_pkt", "rx_inter_pkt"), names_to="var", values_to="val") %>%
+  ggplot(aes(x = val, color = var)) +
+    labs(title = "RTP Downlink Inter-Pkt. Spacing (1 min)", x = "Inter-Pkt. Spacing [ms]", 
+         y = "CDF") +
+    scale_x_continuous(breaks = seq(0, 35, 5), limits = c(0, 35)) +
+    scale_color_manual(breaks = c("tx_inter_pkt", "rx_inter_pkt"), labels = c("Send", "Receive"),
+                       name = "Type", values = brewer.pal(n = 3, name = "Set1")) +
+    stat_ecdf() +
+    theme_om()
+```
+
+```{r pairwise-cdf-rx, fig.height=3, fig.width=4}
+inter_pkt_down %>%
+  mutate(
+    pkt_index      = row_number(),
+    p_tx_inter_pkt = cume_dist(tx_inter_pkt),
+    p_rx_inter_pkt = cume_dist(rx_inter_pkt)
+  ) %>%
+  ggplot() +
+    labs(x = "Inter-Pkt. Spacing [ms]", y = "CDF") +
+    geom_point(aes(x = rx_inter_pkt, y = p_tx_inter_pkt), color = "#377eb8", size = 0.1) +
+    geom_point(aes(x = tx_inter_pkt, y = p_tx_inter_pkt), color = "#e41a1c", size = 0.1) +
+    theme_om()
+```
+
+```{r down-inter-pkt-scatter, fig.height=3, fig.width=4}
+inter_pkt_down %>%
+  mutate(
+    pkt_index      = row_number(),
+    p_tx_inter_pkt = cume_dist(tx_inter_pkt),
+    p_rx_inter_pkt = cume_dist(rx_inter_pkt)
+  ) %>%
+  ggplot() +
+    labs(x = "Transmit Inter-Pkt. Spacing [ms]", y = "Receive Inter-Pkt. Spacing [ms]") +
+    geom_point(aes(x = tx_inter_pkt, y = rx_inter_pkt), color = "#377eb8", size = 0.1) +
+    theme_om()
+```
+
+
+
+```{r down-inter-pkt-scatter, fig.height=3, fig.width=4}
+inter_pkt_down %>%
+  mutate(
+    pkt_index      = row_number(),
+    p_tx_inter_pkt = cume_dist(tx_inter_pkt),
+    p_rx_inter_pkt = cume_dist(rx_inter_pkt)
+  ) %>%
+  ggplot() +
+    labs(x = "Transmit Inter-Pkt. Spacing [ms]", y = "Receive Inter-Pkt. Spacing [ms]") +
+    geom_point(aes(x = p_tx_inter_pkt, y = p_rx_inter_pkt), color = "#377eb8", size = 0.1) +
+    theme_om()
+```
+
+
+
+# Analyze one-way delay
+
+```{r}
+one_way_delay %>%
+  group_by(dir_ue) %>%
+  summarize(n = n())
+```
+
+```{r one-way-delay-cdf, fig.width = 5, fig.height = 3.5}
+one_way_delay %>%
+  filter(ts_ms_ue >= 60000 & ts_ms_ue < 60000 + 60000) %>%
+  select(dir_ue, one_way_ms) %>%
+  ggplot(aes(x = one_way_ms, color = dir_ue)) +
+    labs(title = "RTP One-way Delay", x = "One-way Delay [ms]", y = "CDF", color = "Direction") +
+    scale_color_discrete(labels = c("Downlink", "Uplink")) +
+    xlim(0, 50) +
+    stat_ecdf() +
+    theme_om()
+```
+
+```{r}
+# one_way_plot_sample <- one_way_delay %>%
+#   filter(dir_ue == "rx" & ts_ms_ue >= start_ms & ts_ms_ue < start_ms + 10000) %>%
+#   select(dir_ue, rtp_ssrc, rtp_tw_seq, ts_ms_ue, ts_ms_sfu, one_way_ms)
+```
+
+```{r uplink-one-way-delay-cdf, fig.height=3.5, fig.width=5}
+one_way_delay %>%
+  filter(dir_ue == "tx" & ts_ms_ue >= start_ms & ts_ms_ue < start_ms + 60000) %>%
+  select(one_way_ms) %>%
+  ggplot(aes(x = one_way_ms)) +
+    stat_ecdf()
+```
+
+
+
+
+```{r}
+#TODO: tw-seq missing, unclear why?
+# one_way_delay %>%
+#     filter(dir_ue == "tx" & ts_ms_ue >= 2700000 & ts_ms_ue < 2700000 + 1000) %>%
+#     ggplot(aes(x = rtp_tw_seq, y = one_way_ms, color = rtp_pt)) +
+#       labs(title = "RTP One-way Delay", x = "GCC Sequence Number", y = "One-Way Delay [ms]", color = "SSRC") +
+#       ylim(0, 40) +
+#       geom_line(color = "darkgray") +
+#       geom_point(size = 0.5) +
+#       theme_om() +
+#       theme(
+#         legend.position = c(0.99, 0.08),
+#         legend.direction = "horizontal"
+#       )
+```
+
+
+
+```{r owd-incr, fig.width = 10, fig.height = 3}
+
+# for (start_ts_ms in seq(0, 30000, 1000)) {
+#   one_way_delay %>%
+#     filter(dir_ue == "tx" & ts_ms_ue >= start_ts_ms & ts_ms_ue < start_ts_ms + 1000) %>%
+#     ggplot(aes(x = rtp_tw_seq, y = one_way_ms, color = rtp_ssrc)) +
+#       labs(title = "RTP One-way Delay", x = "GCC Sequence Number", y = "One-Way Delay [ms]", 
+#            color = "SSRC") +
+#       ylim(0, 40) +
+#       geom_line(color = "darkgray") +
+#       geom_point(size = 0.5) +
+#       theme_om() +
+#       theme(
+#         legend.position = c(0.99, 0.08),
+#         legend.direction = "horizontal"
+#       )
+#   
+#     ggsave(
+#       sprintf("%sowd-increase-tx-%d.png", params$fig_path, start_ts_ms), 
+#       device = "png", width = 10, height = 3)
+# }
+```
+
+```{r owd-bars, fig.width = 10, fig.height = 3}
+# for (start_ts_ms in seq(0, 10000, 250)) {
+#   
+#   one_way_delay %>%
+#     filter(dir_ue == "tx", ts_ms_ue >= start_ts_ms & ts_ms_ue < start_ts_ms + 250) %>%
+#     ggplot(aes(x = ts_ms_ue, xend = ts_ms_sfu, y = rtp_tw_seq, yend = rtp_tw_seq, color = rtp_ssrc)) +
+#     labs(title = "RTP One-way Delay", x = "Timestamp [ms]", y = "GCC Sequence Number", color = "RTP SSRC") +
+#     geom_point(aes(x = ts_ms_ue, y = rtp_tw_seq, color = rtp_ssrc), size = 0.5) +
+#     geom_point(aes(x = ts_ms_sfu, y = rtp_tw_seq, color = rtp_ssrc), size = 0.5) +
+#     geom_segment() +
+#     theme_om() +
+#     theme(legend.position = c(0.99, 0.28))
+#   
+#   ggsave(
+#       sprintf("%sowd-bars-tx-%d.png", params$fig_path, start_ts_ms), 
+#       device = "png", width = 10, height = 3)
+# }
+```

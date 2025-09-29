@@ -1,0 +1,39 @@
+---
+title: "Zoom 06/01 - End-to-end"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+params:
+  join_pkts_up_file: "zoom-0601-join-pkts-up.csv"
+  ssim_file: "zoom-0601-ssim.csv"
+  fig_path: fig/
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+```
+
+```{r import}
+join_pkts_up <- read_csv(params$join_pkts_up_file, col_types = "nnfinfinifnniifnnn")
+ssim <- read_csv(params$ssim_file, col_types="iiin", comment="#")
+
+ssim %<>%
+  mutate(it = as.integer(cumsum(if_else(frame_send - lag(frame_send, default = 0) < -100, 1, 0)))) %>%
+  mutate(frame_send_seq = as.integer(max(frame_send) * it + frame_send + if_else(it > 0, 1, 0))) %>%
+  mutate(ssim = if_else(ssim == -1, NA, ssim)) %>%
+  mutate(frame_incr = frame_send_seq - lag(frame_send_seq)) %>%
+  mutate(frame_incr = if_else(frame_incr == 0, NA, frame_incr))
+```
+
+```{r fig.height = 2.5}
+ssim %>%
+  filter(!is.na(ssim)) %>%
+  ggplot(aes(x = frame_send_seq, y = ssim)) +
+    labs(x = "Frame Number", y = "SSIM") +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+

@@ -1,0 +1,82 @@
+---
+title: "WebRTC Cellular 11/13 Experiment: One-way Delay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  core_data_file: "test-111323-4gcore.csv"
+  ue_data_file: "test-111323-ue.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path) 
+```
+
+```{r import}
+pkts_4gcore <- read_csv(params$core_data_file, col_types="") %>%
+  filter(encap == "gtp" & ip_ttl == 64 & ts_s >= 1699903019) %>%
+  mutate(ts_ms = (ts_s - 1699903019) * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, encap, ip_ttl, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst)) %>%
+  select(-c(ip_src, ip_dst, udp_src, udp_dst)) 
+# %>%
+#   filter(ts_us < 2e5)
+
+pkts_ue <- read_csv(params$ue_data_file, col_types="") %>%
+  filter(ts_s >= 1699903019) %>%
+  mutate(ts_ms = (ts_s - 1699903019) * 1e3 + ts_us / 1e3) %>%
+  select(-c(ts_s, encap, ip_ttl, gtp_ip_src, gtp_ip_dst, gtp_ip_ttl, gtp_udp_src, gtp_udp_dst)) %>%
+  select(-c(ip_src, ip_dst, udp_src, udp_dst))
+# %>%
+#   filter(ts_us < 2e5)
+```
+
+
+```{r}
+plot_params <- list(from = 1250, range = 600)
+
+one_way_delay <- left_join(
+  pkts_ue %>% filter(ts_ms >= plot_params$from & ts_ms <= plot_params$from + plot_params$range), 
+  pkts_4gcore %>% filter(ts_ms >= plot_params$from & ts_ms <= plot_params$from + plot_params$range),
+  join_by("rtp_tw_seq"), suffix = c("_ue", "_4gcore")) %>%
+  select(-c(rtp_ssrc_4gcore, rtp_pt_4gcore, rtp_seq_4gcore, rtp_ts_4gcore)) %>%
+  mutate(rtp_ssrc = as.factor(rtp_ssrc_ue))
+```
+
+```{r owd-incr, fig.width = 5.5, fig.height = 2}
+one_way_delay %>%
+  ggplot(aes(x = rtp_tw_seq, y = ts_ms_4gcore - ts_ms_ue, color = rtp_ssrc)) +
+    labs(x = "GCC Sequence Number", y = "One-Way Delay [ms]", color = "RTP SSRC") +
+    ylim(0, NA) +
+    geom_line(color = "darkgray") +
+    geom_point(size = 0.5) +
+    theme_om() +
+    theme(
+      legend.position = c(0.99, 0.12),
+      legend.direction = "horizontal"
+    )
+```
+
+
+```{r owd-pkts, fig.width = 5.5, fig.height = 3}
+one_way_delay %>%
+  ggplot(aes(x = ts_ms_ue, xend = ts_ms_4gcore, y = rtp_tw_seq, yend = rtp_tw_seq, color = rtp_ssrc)) +
+  labs(y = "GCC Sequence Number", color = "RTP SSRC") +
+  geom_point(aes(x = ts_ms_ue, y = rtp_tw_seq, color = rtp_ssrc), size = 0.5) +
+  geom_point(aes(x = ts_ms_4gcore, y = rtp_tw_seq, color = rtp_ssrc), size = 0.5) +
+  scale_x_continuous("Time [ms]",
+     seq(plot_params$from, plot_params$from + plot_params$range, by = 10),
+     seq(plot_params$from, plot_params$from + plot_params$range, by = 100),
+     c(plot_params$from, plot_params$from + plot_params$range, by = 100),
+     expand = c(0.03, 0)) +
+  geom_segment() +
+  theme_om() +
+  theme(
+    legend.position = c(0.99, 0.25),
+  )
+```
+

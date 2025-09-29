@@ -1,0 +1,77 @@
+---
+title: "WebRTC Cellular 04/19 Experiment (Private 4G/RR): Overview"
+output:
+  html_document:
+    df_print: paged
+params:
+  pkts_file: "p2p-4g-rr-042224-rtp-join.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high",dpi = 300, fig.path=params$fig_path)
+```
+
+```{r import}
+pkts <- read_csv(params$pkts_file, col_types="nnniiffiinnnnn")
+
+pkts %<>% mutate(
+  ts_s_ue_rel = ts_s_ue - min(pkts$ts_s_ue),
+  ts_s_sink_rel = ts_s_ue - min(pkts$ts_s_ue))
+```
+
+```{r}
+pkts %>%
+  group_by(rtp_ssrc,rtp_pt) %>%
+  summarize(n = n(), .groups = "drop")
+```
+
+```{r}
+pkts %>%
+  group_by(ts_s_ue_rel) %>%
+  summarize(pkts = n()) %>%
+  ggplot(aes(x = ts_s_ue_rel, y = pkts)) +
+    scale_x_continuous(breaks = seq(0, 1380, 60)) +
+    geom_line() +
+    theme_om()
+```
+
+```{r}
+pkts %>%
+  group_by(ts_s_ue_rel) %>%
+  summarize(kbit = sum(frame_len) / 1000 * 8) %>%
+  ggplot(aes(x = ts_s_ue_rel, y = kbit)) +
+    scale_x_continuous(breaks = seq(0, 1380, 60)) +
+    geom_line() +
+    theme_om()
+```
+
+
+```{r}
+video_frames <- pkts %>%
+  filter(rtp_pt == 45) %>%
+  group_by(rtp_ts) %>%
+  summarize(min_ts_ms = min(ts_ms_rel_ue), frame_len = sum(frame_len)) %>%
+  mutate(inter_frame_time = min_ts_ms - lag(min_ts_ms))
+```
+
+```{r}
+video_frames %>%
+  ggplot(aes(x = frame_len)) +
+    stat_ecdf()
+```
+
+```{r}
+video_frames %>%
+  ggplot(aes(x = frame_len)) +
+    stat_ecdf()
+```
+
+```{r}
+video_frames %>%
+  ggplot(aes(x = inter_frame_time)) +
+    stat_ecdf()
+```

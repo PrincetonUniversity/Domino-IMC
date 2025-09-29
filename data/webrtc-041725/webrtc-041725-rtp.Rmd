@@ -1,0 +1,57 @@
+---
+title: "RTP Trace"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  rtp_ue_data_file: "webrtc-041725-rtp-ue.csv"
+  rtp_gcp_data_file: "webrtc-041725-rtp-gcp.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+```
+
+```{r}
+ue <- read_csv(params$rtp_ue_data_file, col_types = "nn_ff_ff_____iiffiniiii")
+gcp <- read_csv(params$rtp_gcp_data_file, col_types = "nn_ff_ff_____iiffiniiii")
+
+ue %<>% 
+  mutate(dir = as.factor(if_else(ip_src == "192.168.139.127", "up", "down"))) %>%
+  mutate(ts = to_ms(ts_s, ts_us, min(ue$ts_s)))
+gcp %<>% 
+  mutate(dir = as.factor(if_else(ip_src == "172.56.221.126", "up", "down"))) %>%
+  mutate(ts = to_ms(ts_s, ts_us, min(ue$ts_s)))
+
+up <- left_join(ue %>% filter(dir == "up"), gcp %>% filter(dir == "up"),
+                by = join_by(rtp_tw_seq, rtp_seq), suffix = c("_ue", "_gcp"))
+
+up %<>% mutate(owd_ms = ts_gcp - ts_ue)
+```
+
+```{r}
+up %>%
+  ggplot(aes(x = owd_ms)) +
+    stat_ecdf() +
+    xlim(0,100)
+```
+
+
+```{r}
+up %>%
+  filter(rtp_tw_seq > 1500 & rtp_tw_seq < 1600) %>%
+  ggplot(aes(x = rtp_tw_seq, y = owd_ms)) +
+    geom_line() +
+    geom_point()
+```
+
+```{r}
+up %>%
+  filter(rtp_tw_seq > 2000 & rtp_tw_seq < 2100) %>%
+  ggplot(aes(x = ts_ue, xend = ts_gcp, y = rtp_tw_seq, yend = rtp_tw_seq, color = as.factor(rtp_ts_ue))) +
+    geom_segment()
+```
+
+

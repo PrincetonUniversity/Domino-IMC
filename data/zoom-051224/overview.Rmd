@@ -1,0 +1,231 @@
+---
+title: "Zoom Experiment 05/12/2024 -- Overview"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  ue_pkts_file: "zoom-051224-ue-pkts.csv"
+  core_pkts_file: "zoom-051224-core-pkts.csv"
+  ue_frames_file: "zoom-051224-core-frames.csv"
+  ul_tbs_file: "zoom-051224-ul-tbs-delay.csv"
+  fig_path: "fig/"
+---
+
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+library(cowplot)
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high",dpi = 300, fig.path=params$fig_path)
+```
+
+```{r import}
+ue_pkts <- read_csv(params$ue_pkts_file, col_types = "nnfffcicifiniiniff")
+core_pkts <- read_csv(params$core_pkts_file, col_types = "nnfffcicifiniiniff")
+core_frames <- read_csv(params$ue_frames_file, col_types = "nciciiffnnnnniiiin")
+
+ul_tbs_delay <- read_csv(params$ul_tbs_file, col_types = "niiln") %>%
+  rename(ts = "Timestamp", tbs = "TBS", phy_rtx_delay = "PHY_ReTX_Delay(ms)",
+         rlc_fail = "RLC_failure", rlc_init_tx_ts = "RLC_initTX_timestamp")
+```
+
+```{r}
+start_ts <- max(min(ue_pkts$ts_s),min(core_pkts$ts_s))
+```
+
+```{r}
+ue_pkts %<>%
+  filter(ts_s > start_ts) %>%
+  mutate(ts = (ts_s - start_ts) + ts_us / 1e6) %>%
+  select(-c(flow_type, dir, ip_proto, ts_s, ts_us, drop)) %>%
+  mutate(dir = as.factor(if_else(tp_dst == 8801, "up", "down"))) %>%
+  relocate(ts)
+
+core_pkts %<>%
+  filter(ts_s > start_ts) %>%
+  mutate(ts = (ts_s - start_ts) + ts_us / 1e6) %>%
+  select(-c(flow_type, dir, ip_proto, ts_s, ts_us, drop)) %>%
+  mutate(dir = as.factor(if_else(tp_dst == 8801, "up", "down"))) %>%
+  relocate(ts)
+
+core_frames %<>%
+  filter(min_ts_s > start_ts) %>%
+  mutate(
+    min_ts = (min_ts_s - start_ts) + min_ts_us / 1e6,
+    max_ts = (max_ts_s - start_ts) + max_ts_us / 1e6) %>%
+  select(-c(ip_proto)) %>%
+  mutate(dir = as.factor(if_else(tp_dst == 8801, "up", "down"))) %>%
+  relocate(min_ts, max_ts)
+
+ul_tbs_delay %<>%
+  mutate(
+    ts             = (ts / 1000) - start_ts,
+    rlc_init_tx_ts = (rlc_init_tx_ts / 1000) - start_ts,
+    phy_rtx_delay  = if_else(phy_rtx_delay == 0, NA, phy_rtx_delay)) %>%
+  filter(ts >= 0)
+```
+
+```{r}
+core_frames %>%
+  filter(media_type == 16 & dir == "up") %>%
+  ggplot(aes(x = fps)) +
+    stat_ecdf()
+```
+
+```{r}
+core_frames %>%
+  filter(media_type == 16 & dir == "up") %>%
+  ggplot(aes(x = jitter_ms)) +
+    stat_ecdf()
+```
+
+```{r}
+core_frames %>%
+  filter(media_type == 16 & dir == "up") %>%
+  filter(max_ts >= 300 & max_ts < 302) %>%
+  ggplot(aes(x = max_ts, y = fps)) +
+    geom_line()
+```
+
+```{r}
+core_frames %>%
+  filter(media_type == 16 & dir == "up") %>%
+  filter(max_ts >= 300 & max_ts < 302) %>%
+  ggplot(aes(x = max_ts, y = jitter_ms)) +
+    geom_line()
+```
+
+
+```{r}
+ue_pkts %>%
+  group_by(dir,ip_src,tp_src,ip_dst,tp_dst,media_type,ssrc) %>%
+  summarize(n = n(), bytes = sum(pl_len), min_ts = min(ts), max_ts = max(ts), .groups = "drop")
+```
+
+```{r}
+core_pkts %>%
+  group_by(dir,ip_src,tp_src,ip_dst,tp_dst,media_type,ssrc) %>%
+  summarize(n = n(), bytes = sum(pl_len), min_ts = min(ts), max_ts = max(ts), .groups = "drop")
+```
+
+
+
+```{r}
+ue_pkts %>%
+  mutate(s = as.integer(ts)) %>%
+  group_by(s,dir) %>%
+  summarize(pkts = n(), bytes = sum(pl_len), .groups = "drop") %>%
+  ggplot(aes(x = s, y = bytes * 8 / 1000, color = dir)) +
+    scale_x_continuous(expand = c(0.01,0)) +
+    scale_y_continuous(expand = c(0.02,0)) +
+    scale_color_brewer(palette = "Set1") +
+    labs(x = "Time [s]", y = "Data Rate [kbit/s]", color = "Direction") +
+    geom_line() +
+    theme_om()
+```
+
+```{r}
+joined_up <- left_join(
+  ue_pkts %>% filter(dir == "up") %>% select(ts, media_type, ssrc, pt, rtp_seq, rtp_ts, pl_len, rtp_ext1),
+  core_pkts %>% filter(dir == "up") %>% select(ts, media_type, ssrc, pt, rtp_seq, rtp_ts, pl_len, rtp_ext1),
+  by = join_by(ssrc, pt, media_type, rtp_seq, rtp_ts, rtp_ext1, pl_len),
+  suffix = c("_ue", "_core")) %>%
+  relocate(ts_core, .after = ts_ue) %>%
+  mutate(delay = ts_core - ts_ue)
+```
+
+```{r fig.width = 12, fig.height = 6, dpi = 300}
+
+plot_params <- list(start = 377, end = 381)
+
+plot_grid(
+  joined_up %>%
+    rename(ts = ts_ue) %>%
+    filter(ts >= plot_params$start & ts < plot_params$end) %>%
+    ggplot(aes(x = ts, y = delay * 1000)) +
+      labs(x = "Time", y = "Packet One-Way Delay [ms]") +
+      xlim(plot_params$start, plot_params$end) +
+      ylim(0, NA) +
+      geom_line(color = "dodgerblue4") +
+      geom_point(color = "dodgerblue4") +
+      theme_om(),
+  core_frames %>%
+    filter(media_type == 16 & dir == "up") %>%
+    filter(max_ts >= plot_params$start & max_ts < plot_params$end) %>%
+    ggplot(aes(x = max_ts, y = fps, color = rtp_ext1)) +
+      labs(x = "Time", y = "Frame Rate") +
+      xlim(plot_params$start, plot_params$end) +
+      geom_line(color = "dodgerblue4") +
+      geom_point() +
+      theme_om(),
+  core_frames %>%
+    filter(media_type == 16 & dir == "up") %>%
+    filter(max_ts >= plot_params$start & max_ts < plot_params$end) %>%
+    ggplot(aes(x = max_ts, y = jitter_ms)) +
+      labs(x = "Time", y = "RTP Jitter [ms]") +
+      xlim(plot_params$start, plot_params$end) +
+      geom_line(color = "dodgerblue4") +
+      geom_point(color = "dodgerblue4") +
+      theme_om(),
+  ul_tbs_delay %>%
+    filter(ts >= plot_params$start & ts < plot_params$end) %>%
+    ggplot(aes(x = ts, xend = ts, y = 0, yend = phy_rtx_delay)) +
+      labs(x = "Time", y = "PHY RTX") +
+      xlim(plot_params$start, plot_params$end) +
+      scale_y_continuous(breaks = seq(0, 60, by = 10)) +
+      geom_segment(linewidth = 2, color = "firebrick") +
+      theme_om(), 
+  ncol = 1, align = "v", rel_heights = c(2, 1, 1, 1))
+```
+
+
+
+
+```{r}
+ul_tbs_delay %>%
+  filter(ts >= 300 & ts < 302) %>%
+  ggplot(aes(x = ts, xend = ts, y = 0, yend = phy_rtx_delay)) +
+    geom_segment(linewidth = 2)
+```
+
+
+
+```{r}
+joined_up %>%
+  filter(ts_ue >= 375 & ts_ue < 385) %>%
+  ggplot(aes(x = ts_ue, y = delay * 1000)) +
+    ylim(0, NA) +
+    geom_line() +
+    geom_point()
+```
+
+```{r}
+ul_tbs_delay %>%
+  filter(ts >= 375 & ts < 385) %>%
+  ggplot(aes(x = ts, xend = ts, y = 0, yend = phy_rtx_delay)) +
+    geom_segment(linewidth = 1)
+```
+
+```{r}
+joined_up %>%
+  filter(ssrc == 16778242) %>%
+  slice(5800:6200) %>%
+  ggplot(aes(x = rtp_seq, y = delay * 1000)) +
+    ylim(0, NA) +
+    geom_line() +
+    geom_point()
+```
+
+
+```{r}
+joined_up %>%
+  ggplot(aes(x = delay * 1000)) +
+    xlim(0, 100) +
+    stat_ecdf()
+```
+
+
+

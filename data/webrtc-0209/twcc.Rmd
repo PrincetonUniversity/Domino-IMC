@@ -1,0 +1,138 @@
+---
+title: "Transport-Wide CC Analysis"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  rtp_data_file: "webrtc-0209-ue-rtp.csv"
+  rtcp_data_file: "webrtc-0209-ue-rtcp.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path)
+```
+
+```{r import}
+rtp <- read_csv(params$rtp_data_file, col_types="") %>%
+  select(ts_s, ts_us, ip_src, ip_dst, udp_src, udp_dst, rtp_tw_seq, rtp_abs_send, rtp_ssrc)
+rtcp <- read_csv(params$rtcp_data_file, col_types="") %>%
+  select(ts_s, ts_us, ip_src, ip_dst, udp_src, udp_dst, sender_ssrc, media_ssrc, rtp_tw_seq, rxd, rx_time)
+```
+
+```{r}
+rtp %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst, rtp_ssrc) %>%
+  summarize(n=n(), .groups="drop")
+```
+
+```{r}
+rtcp %>%
+  group_by(ip_src, ip_dst, udp_src, udp_dst, sender_ssrc, media_ssrc) %>%
+  summarize(n=n(), .groups="drop")
+```
+
+```{r}
+uplink_rtp <- rtp %>%
+  mutate(ts_s = ts_s - min(min(rtp$ts_s), min(rtcp$ts_s))) %>%
+  mutate(ts_s = ts_s + (ts_us / 1e6)) %>%
+  select(-ts_us) %>%
+  filter(ip_src == "192.168.178.84")
+
+uplink_rtcp <- rtcp %>%
+  mutate(ts_s = ts_s - min(min(rtp$ts_s), min(rtcp$ts_s))) %>%
+  mutate(ts_s = ts_s + (ts_us / 1e6)) %>%
+  select(-ts_us) %>%
+  filter(ip_dst == "192.168.178.84")
+
+joined <- left_join(
+  uplink_rtp %>% slice(1:50000) %>% select(ts_s, rtp_tw_seq, rtp_abs_send),
+  uplink_rtcp %>% slice(1:50000) %>% select(ts_s, rtp_tw_seq, rxd, rx_time),
+  by=join_by("rtp_tw_seq"), suffix=c("_rtp", "_rtcp")) %>%
+  mutate(o = rx_time - rtp_abs_send)
+```
+
+```{r, fig.asp = 0.3}
+joined %>%
+  ggplot(aes(x=ts_s_rtp, y=rtp_tw_seq)) +
+    labs(x="RTP Send Time [s]", y="TWCC Sequence #") +
+    geom_step(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r, fig.asp = 0.3}
+joined %>%
+  ggplot(aes(x = ts_s_rtp, y=rtp_abs_send)) +
+    labs(x="RTP Send Time [s]", y="TWCC Abs.-Send Time [ms]") +
+    geom_step(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r, fig.asp = 0.3}
+joined %>%
+  ggplot(aes(x = ts_s_rtp, y=rx_time)) +
+    labs(x="RTP Send Time [s]", y="TWCC Pkt. Rx. Time [ms]") +
+    geom_step(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r, fig.asp = 0.3}
+joined %>%
+  ggplot(aes(x=ts_s_rtp, y=o)) +
+    labs(x="RTP Send Time [s]", y="Rel. One-Way Delay [ms]") +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r}
+example <- joined %>%
+  filter(ts_s_rtp > 35 & ts_s_rtp < 45) %>%
+  mutate(d = o - lag(o))
+```
+
+```{r, fig.asp = 0.3}
+example %>%
+  ggplot(aes(x = ts_s_rtp, y = o)) +
+    labs(x="RTP Send Time [s]", y="Rel. One-Way Delay [ms]") +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+```{r, fig.asp = 0.3}
+example %>%
+  slice(1:100) %>%
+  ggplot(aes(x = rtp_tw_seq, y = o)) +
+    labs(x="RTP Send Time [s]", y="Rel. One-Way Delay [ms]") +
+    geom_line(color = "dodgerblue4") +
+    geom_point(color = "dodgerblue4", size=1) +
+    theme_om()
+```
+
+
+```{r, fig.asp = 0.3}
+example %>%
+  ggplot(aes(x = ts_s_rtp, y = d)) +
+    labs(x="RTP Send Time [s]", y="One-Way Delay Variation [ms]") +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+```{r, fig.width = 3.8, fig.height = 2.6}
+example %>%
+  ggplot(aes(x=o)) +
+    labs(x="TWCC One-Way Delay [ms]", y="CDF") +
+    stat_ecdf(color = "dodgerblue4", pad=FALSE) +
+    theme_om()
+```
+
+```{r, fig.width = 3.8, fig.height = 2.6}
+example %>%
+  ggplot(aes(x=d)) +
+    labs(x="TWCC One-Way Delay [ms]", y="CDF") +
+    stat_ecdf(color = "dodgerblue4", pad=FALSE) +
+    theme_om()
+```
+

@@ -1,0 +1,323 @@
+---
+title: "WebRTC Cellular 02/22 ICMP Echo Experiment: One-way Delay"
+date: "`r Sys.Date()`"
+output: html_document
+params:
+  ue_data_file: "ue.csv"
+  enb_data_file: "enb.csv"
+  core_data_file: "core.csv"
+  sfu_data_file: "sfu.csv"
+  fig_path: "fig/"
+---
+
+```{R setup, include=FALSE}
+source("../r/setup.R")
+
+knitr::opts_chunk$set(dev=c("png", "pdf"), fig.width=9, fig.height=4.5,
+  fig.align="center", fig.keep="high", fig.path=params$fig_path, dpi = 300) 
+
+library(RColorBrewer)
+```
+
+UE:  192.168.0.51  -> 192.168.68.8
+eNB: 192.168.68.13 -> 192.168.252.3
+Cr:  192.168.68.13 -> 192.168.252.3 && ttl == 64
+SFU: 192.168.68.2  -> 192.168.68.8 
+
+SFU: 192.168.68.2  <- 192.168.68.8
+Cr:  192.168.68.13 <- 192.168.252.3 && ttl == 63
+eNB: 192.168.68.13 <- 192.168.252.3
+UE:  192.168.0.51  <- 192.168.68.8
+
+* import packets:
+
+```{r import}
+pkts_ue <- read_csv(params$ue_data_file, col_types="iiffiffci")
+pkts_ue_up <- pkts_ue %>%
+  filter(ip_src == "192.168.0.51" & ip_dst == "192.168.68.8")
+pkts_ue_down <- pkts_ue %>%
+  filter(ip_dst == "192.168.0.51" & ip_src == "192.168.68.8")
+
+pkts_enb <- read_csv(params$enb_data_file, col_types="iiffiffci")
+pkts_enb_down <- pkts_enb %>%
+  filter(ip_src == "192.168.68.13" & ip_dst == "192.168.252.3")
+pkts_enb_up <- pkts_enb %>%
+  filter(ip_dst == "192.168.68.13" & ip_src == "192.168.252.3")
+
+pkts_core <- read_csv(params$core_data_file, col_types="iiffiffci")
+pkts_core_up <- pkts_core %>%
+  filter(ip_src == "192.168.68.13" & ip_dst  == "192.168.252.3" & ip_ttl == 64)
+
+pkts_sfu <- read_csv(params$sfu_data_file, col_types="iiffiffci")
+pkts_sfu_up <- pkts_sfu %>%
+  filter(ip_src == "192.168.68.2" & ip_dst == "192.168.68.8")
+```
+
+
+
+```{r results='asis'}
+bind_rows(
+  pkts_ue %>% filter(icmp_id == 1846 & icmp_seq == 13500) %>% mutate(loc = "ue"),
+  pkts_enb %>% filter(icmp_id == 1846 & icmp_seq == 13500) %>% mutate(loc = "enb"),
+  pkts_core %>% filter(icmp_id == 1846 & icmp_seq == 13500) %>% mutate(loc = "core"),
+  pkts_sfu %>% filter(icmp_id == 1846 & icmp_seq == 13500) %>% mutate(loc = "sfu")
+) %>% arrange(ts_us)
+```
+
+
+
+
+* normalize time:
+
+```{r}
+base_ts_s <- max(
+  min(pkts_ue_up$ts_s),
+  min(pkts_enb_up$ts_s),
+  min(pkts_core_up$ts_s),
+  min(pkts_sfu_up$ts_s))
+
+pkts_ue_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_ue_down %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_enb_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_enb_down %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_core_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+
+pkts_sfu_up %<>%
+  filter(ts_s >= base_ts_s) %>%
+  mutate(ts_s = ts_s - base_ts_s, ts_ms_rel = ts_s * 1e3 + ts_us / 1e3) %>%
+  relocate(ts_ms_rel, .after = ts_us)
+```
+
+```{r}
+pkts_ue_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+pkts_enb_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+pkts_core_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+pkts_sfu_up %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+
+owd_up <- pkts_ue_up %>%
+  # join enb
+  left_join(pkts_enb_up, join_by(icmp_id, icmp_seq), suffix = c("_ue", "_enb")) %>%
+  mutate(owd_ue_enb = ts_ms_rel_enb - ts_ms_rel_ue)
+  
+  
+  # # join core
+  # left_join(pkts_core_up, join_by(icmp_id, icmp_seq)) %>%
+  # rename(ts_ms_rel_core = ts_ms_rel) %>%
+  # mutate(owd_enb_core = ts_ms_rel_core - ts_ms_rel_enb) %>%
+  # # join sfu
+  # left_join(pkts_sfu_up, join_by(icmp_id, icmp_seq)) %>%
+  # rename(ts_ms_rel_sfu = ts_ms_rel) %>%
+  # mutate(owd_core_sfu = ts_ms_rel_sfu - ts_ms_rel_core)
+```
+
+
+```{r seq, fig.width = 4, fig.height = 3}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  mutate(ts_s = ts_ms_rel_ue / 1000) %>%
+  ggplot(aes(x = ts_s, y = icmp_seq)) +
+    geom_line(color = "dodgerblue4") +
+    theme_om()
+```
+
+
+```{r owd-ue-enb-1, fig.width = 12, fig.height = 6}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 13000 & icmp_seq < 18000) %>%
+  mutate(icmp_seq_mod1000 = icmp_seq %% 1000) %>%
+  mutate(idx = as.integer(icmp_seq / 1000)) %>%
+  ggplot(aes(x = icmp_seq_mod1000, y = owd_ue_enb)) +
+    labs(x = "ICMP seq. % 1000", y = "UE-eNB one-way delay [ms]") +
+    scale_x_continuous(breaks = seq(0, 1000, 100), expand = c(0.0125, 0)) +
+    ylim(10, NA) +
+    geom_line(color = "dodgerblue4") +
+    facet_wrap(~idx, ncol=1) +
+    theme_om()
+```
+
+```{r owd-ue-enb-2, fig.width = 12, fig.height = 6}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 18000 & icmp_seq < 23000) %>%
+  mutate(icmp_seq_mod1000 = icmp_seq %% 1000) %>%
+  mutate(idx = as.integer(icmp_seq / 1000)) %>%
+  ggplot(aes(x = icmp_seq_mod1000, y = owd_ue_enb)) +
+    labs(x = "ICMP seq. % 1000", y = "UE-eNB one-way delay [ms]") +
+    scale_x_continuous(breaks = seq(0, 1000, 100), expand = c(0.0125, 0)) +
+    ylim(10, NA) +
+    geom_line(color = "dodgerblue4") +
+    facet_wrap(~idx, ncol=1) +
+    theme_om()
+```
+
+```{r owd-ue-enb-3, fig.width = 12, fig.height = 6}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 23000 & icmp_seq < 28000) %>%
+  mutate(icmp_seq_mod1000 = icmp_seq %% 1000) %>%
+  mutate(idx = as.integer(icmp_seq / 1000)) %>%
+  ggplot(aes(x = icmp_seq_mod1000, y = owd_ue_enb)) +
+    labs(x = "ICMP seq. % 1000", y = "UE-eNB one-way delay [ms]") +
+    scale_x_continuous(breaks = seq(0, 1000, 100), expand = c(0.0125, 0)) +
+    ylim(10, NA) +
+    geom_line(color = "dodgerblue4") +
+    facet_wrap(~idx, ncol=1) +
+    theme_om()
+```
+
+```{r owd-ue-enb-4, fig.width = 12, fig.height = 6}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 28000 & icmp_seq < 33000) %>%
+  mutate(icmp_seq_mod1000 = icmp_seq %% 1000) %>%
+  mutate(idx = as.integer(icmp_seq / 1000)) %>%
+  ggplot(aes(x = icmp_seq_mod1000, y = owd_ue_enb)) +
+    labs(x = "ICMP seq. % 1000", y = "UE-eNB one-way delay [ms]") +
+    scale_x_continuous(breaks = seq(0, 1000, 100), expand = c(0.0125, 0)) +
+    ylim(10, NA) +
+    geom_line(color = "dodgerblue4") +
+    facet_wrap(~idx, ncol=1) +
+    theme_om()
+```
+
+```{r ow-ue-enb-detail-1, fig.width = 8, fig.height = 3}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 15100 & icmp_seq < 15150) %>%
+  ggplot(aes(x = icmp_seq, y = owd_ue_enb)) +
+    labs(x = "ICMP seq.", y = "UE-eNB one-way delay [ms]") +
+    scale_x_continuous(expand = c(0.0125, 0)) +
+    ylim(10, NA) +
+    geom_line(color = "dodgerblue4") +
+    geom_point(color = "dodgerblue4") +
+    theme_om()
+```
+```{r ow-ue-enb-detail-1-bar, fig.width = 8, fig.height = 4}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 15100 & icmp_seq < 15150) %>%
+  ggplot(aes(x = ts_ms_rel_ue, xend = ts_ms_rel_enb, y = icmp_seq, yend = icmp_seq)) +
+    labs(x = "Time [ms]", y = "ICMP seq.") +
+    scale_x_continuous(expand = c(0.0125, 0)) +
+    geom_segment(color = "dodgerblue4", linewidth = 0.8) +
+    theme_om()
+```
+
+```{r ow-ue-enb-detail-2, fig.width = 8, fig.height = 3}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 22800 & icmp_seq < 22850) %>%
+  ggplot(aes(x = icmp_seq, y = owd_ue_enb)) +
+    labs(x = "ICMP seq.", y = "UE-eNB one-way delay [ms]") +
+    scale_x_continuous(expand = c(0.0125, 0)) +
+    ylim(10, NA) +
+    geom_line(color = "dodgerblue4") +
+    geom_point(color = "dodgerblue4") +
+    theme_om()
+```
+```{r ow-ue-enb-detail-2-bar, fig.width = 8, fig.height = 4}
+owd_up %>%
+  filter(!is.na(owd_ue_enb)) %>%
+  filter(icmp_seq >= 22800 & icmp_seq < 22850) %>%
+  ggplot(aes(x = ts_ms_rel_ue, xend = ts_ms_rel_enb, y = icmp_seq, yend = icmp_seq)) +
+    labs(x = "Time [ms]", y = "ICMP seq.") +
+    scale_x_continuous(expand = c(0.0125, 0)) +
+    geom_segment(color = "dodgerblue4", linewidth = 0.8) +
+    theme_om()
+```
+
+
+
+```{r}
+pkts_ue_down %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+pkts_enb_down %<>% select(ts_ms_rel, icmp_id, icmp_seq)
+
+owd_down <- pkts_enb_down %>%
+  # join enb
+  left_join(pkts_ue_down, join_by(icmp_id, icmp_seq), suffix = c("_enb", "_ue")) %>%
+  mutate(owd_enb_ue = ts_ms_rel_ue - ts_ms_rel_enb)
+```
+
+```{r owd-ue-enb-cdf, fig.width = 4, fig.height = 3}
+bind_rows(
+  owd_up %>%
+    filter(!is.na(owd_ue_enb)) %>%
+    mutate(owd = owd_ue_enb, type = "up") %>%
+    select(type, owd),
+  owd_down %>%
+    filter(!is.na(owd_enb_ue)) %>%
+    mutate(owd = owd_enb_ue, type = "down") %>%
+    select(type, owd)
+) %>%
+  ggplot(aes(x = owd, color = type)) +
+    labs(x = "Uplink one-way delay [ms]", y = "CDF") +
+    scale_color_brewer(
+      name = "Type",
+      palette = "Set1",
+      breaks = c("down", "up"),
+      labels = c("Down", "Up")) +
+    stat_ecdf() +
+    theme_om()
+
+
+```
+
+
+```{r owd-enb-ue-1, fig.width = 12, fig.height = 6}
+owd_down %>%
+  filter(!is.na(owd_enb_ue)) %>%
+  filter(icmp_seq >= 13000 & icmp_seq < 18000) %>%
+  mutate(icmp_seq_mod1000 = icmp_seq %% 1000) %>%
+  mutate(idx = as.integer(icmp_seq / 1000)) %>%
+  ggplot(aes(x = icmp_seq_mod1000, y = owd_enb_ue)) +
+    labs(x = "ICMP seq. % 1000", y = "eNB-UE one-way delay [ms]") +
+    scale_x_continuous(breaks = seq(0, 1000, 100), expand = c(0.0125, 0)) +
+    geom_line(color = "dodgerblue4") +
+    facet_wrap(~idx, ncol=1) +
+    theme_om()
+```
+
+```{r ow-enb-ue-detail-1, fig.width = 8, fig.height = 3}
+owd_down %>%
+  filter(!is.na(owd_enb_ue)) %>%
+  filter(icmp_seq >= 24850 & icmp_seq < 24950) %>%
+  ggplot(aes(x = icmp_seq, y = owd_enb_ue)) +
+    ylim(8,25) +
+    labs(x = "ICMP seq.", y = "eNB-UE one-way delay [ms]") +
+    scale_x_continuous(expand = c(0.0125, 0)) +
+    geom_line(color = "dodgerblue4") +
+    geom_point(color = "dodgerblue4", size = 0.8) +
+    theme_om()
+```
+```{r ow-enb-ue-detail-2, fig.width = 8, fig.height = 3}
+owd_down %>%
+  filter(!is.na(owd_enb_ue)) %>%
+  filter(icmp_seq >= 29000 & icmp_seq < 29100) %>%
+  ggplot(aes(x = icmp_seq, y = owd_enb_ue)) +
+    ylim(8,25) +
+    labs(x = "ICMP seq.", y = "eNB-UE one-way delay [ms]") +
+    scale_x_continuous(expand = c(0.0125, 0)) +
+    geom_line(color = "dodgerblue4") +
+    geom_point(color = "dodgerblue4", size = 0.8) +
+    theme_om()
+```
