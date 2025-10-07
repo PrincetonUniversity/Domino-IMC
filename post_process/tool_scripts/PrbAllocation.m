@@ -1,0 +1,78 @@
+function PrbAllocation(data, bin_sz_phy, slot_duration, duplex, is_dl, datapath)
+    % Check if duplex mode is supported
+    % if strcmpi(duplex, 'TDD')
+    %     text(0.5, 0.5, 'TDD mode has specific slot structure for PRB allocation plotting', ...
+    %         'HorizontalAlignment', 'center', 'FontSize', 14);
+    % end
+    
+    % For FDD, proceed with implementation
+    % Group PRB data by bin_size
+    ts_binned = floor((data.ts_physync - data.min_time)/bin_sz_phy);
+    unique_bins = unique(ts_binned);
+    
+    % Initialize arrays for UEs of interest and other UEs
+    prb_sum_interest = zeros(size(unique_bins));
+    prb_sum_others = zeros(size(unique_bins));
+    
+    % Process each time bin
+    for i = 1:length(unique_bins)
+        bin_indices = find(ts_binned == unique_bins(i));
+        
+        % Get which entries in this bin belong to UEs of interest
+        bin_is_interest = data.is_interest_ue(bin_indices);
+        bin_is_sib = data.is_sib(bin_indices);
+        
+        % Count unique slots in this bin
+        unique_slots = unique(data.ts_physync(bin_indices));
+        total_slots_bin = length(unique_slots);
+        
+        % Count slots with UEs of interest
+        interest_slots = unique(data.ts_physync(bin_indices(bin_is_interest)));
+        num_interest_slots = length(interest_slots);
+        
+        % Count slots with other UEs
+        other_slots = unique(data.ts_physync(bin_indices(~bin_is_interest)));
+        num_other_slots = length(other_slots);
+        
+        % Count slots with both types of UEs (intersection)
+        both_slots = intersect(interest_slots, other_slots);
+        num_either_slots = num_interest_slots + num_other_slots - length(both_slots);
+        
+        % Calculate average PRB for UEs of interest in this bin
+        if any(bin_is_interest)
+            interest_indices = bin_indices(bin_is_interest);
+            if num_either_slots > 0
+                prb_sum_interest(i) = sum(data.prb_physync(interest_indices)) / num_either_slots;
+            end
+        end
+        
+        % Calculate average PRB for other UEs in this bin
+        if any(~bin_is_interest & ~bin_is_sib)
+            other_indices = bin_indices(~bin_is_interest & ~bin_is_sib);
+            if num_either_slots > 0
+                prb_sum_others(i) = sum(data.prb_physync(other_indices)) / num_either_slots;
+            end
+        end
+        
+        % Log information about slot counts if needed for debugging
+        % fprintf('Bin %d: Total slots: %d, Interest slots: %d, Other slots: %d, Both: %d\n', ...
+        %     i, total_slots_bin, num_interest_slots, num_other_slots, num_both_slots);
+    end
+    
+    % Convert bin indices to seconds for x-axis
+    % Calculate bin centers instead of bin edges to align with fig 2
+    bin_size_sec = bin_sz_phy / 1000;  % Convert to seconds
+    time_bins = (unique_bins * bin_sz_phy)/1000 + (bin_size_sec/2);  % Add half bin size to get centers
+        
+    if is_dl
+        time_dl_prb_interest = [time_bins; prb_sum_interest];
+        time_dl_prb_others = [time_bins; prb_sum_others];
+        save([datapath 'time_dl_prb_interest.mat'], "time_dl_prb_interest");
+        save([datapath 'time_dl_prb_others.mat'], "time_dl_prb_others");
+    else
+        time_ul_prb_interest = [time_bins; prb_sum_interest];
+        time_ul_prb_others = [time_bins; prb_sum_others];
+        save([datapath 'time_ul_prb_interest.mat'], "time_ul_prb_interest");
+        save([datapath 'time_ul_prb_others.mat'], "time_ul_prb_others");
+    end
+end

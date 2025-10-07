@@ -1,0 +1,11 @@
+rrc_state_change --> dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+rrc_state_change --> ul_app_bitrate_over_phy_bitrate --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+dl_rlc_retx --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+ul_rlc_retx --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+dl_harq_retx --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+ul_harq_retx --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+ul_scheduling_delay --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+dl_cross_traffic --> dl_tbs_drop --> dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+ul_cross_traffic --> ul_tbs_drop --> ul_app_bitrate_over_phy_bitrate --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+dl_channel_bad --> dl_tbs_drop --> dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+ul_channel_bad --> ul_tbs_drop --> ul_app_bitrate_over_phy_bitrate --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down

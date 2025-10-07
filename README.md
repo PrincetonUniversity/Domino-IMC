@@ -274,7 +274,8 @@ Merge and plot figures:
 merge_csv_webrtc5g.m
 syncAPP_5g_webrtc.m
 ```
-
+### 4. Run Analysis
+Please use Matlab scripts in /Domino-IMC/post_process to analyze the cross-layer data. Example outputs are shown in /Domino-IMC/post_process/paper_figure/.
 ---
 
 ## 🧰 Troubleshooting Tips
