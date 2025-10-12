@@ -1,0 +1,2 @@
+dl_rlc_retx --> forward_delay_up --> local_jitter_buffer_drain 
+dl_harq_retx --> forward_delay_up --> local_jitter_buffer_drain

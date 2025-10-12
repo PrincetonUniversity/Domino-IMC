@@ -76,7 +76,7 @@ def extract_window(data_dict, start_time, end_time):
     windows[key] = get_window(data_array, start_time, end_time)
   return windows
 
-def extract_feature(window):
+def extract_feature(window, max_prb=0):
   feature = np.zeros(36)
 
   ''' Consequences: ''' 
@@ -239,8 +239,12 @@ def extract_feature(window):
 
   ## 16. bool: does UE outstanding bytes (UL) increase?
   try:
-    outstanding_diff = window['time_ul_gcc_outstanding_bytes'][1:] - \
-      window['time_ul_gcc_outstanding_bytes'][:-1]
+    outstanding_wind = np.copy(window['time_ul_gcc_outstanding_bytes'])
+    outstanding_wind_res = np.zeros([int(outstanding_wind.shape[0]/10)])
+    for o_id in range(outstanding_wind_res.shape[0]-1):
+      outstanding_wind_res[o_id] = np.mean(outstanding_wind[o_id*10:o_id*10+10])
+    outstanding_diff = outstanding_wind_res[1:] - \
+      outstanding_wind_res[:-1]
     for i in range(outstanding_diff.shape[0]):
       if (outstanding_diff[i] > 0):
         feature[16] = 1
@@ -250,8 +254,12 @@ def extract_feature(window):
 
   ## 17. bool: does server outstanding bytes (DL) increase?
   try:
-    outstanding_diff = window['time_dl_gcc_outstanding_bytes'][1:] - \
-      window['time_dl_gcc_outstanding_bytes'][:-1]
+    outstanding_wind = np.copy(window['time_dl_gcc_outstanding_bytes'])
+    outstanding_wind_res = np.zeros([int(outstanding_wind.shape[0]/10)])
+    for o_id in range(outstanding_wind_res.shape[0]-1):
+      outstanding_wind_res[o_id] = np.mean(outstanding_wind[o_id*10:o_id*10+10])
+    outstanding_diff = outstanding_wind_res[1:] - \
+      outstanding_wind_res[:-1]
     for i in range(outstanding_diff.shape[0]):
       if (outstanding_diff[i] > 0):
         feature[17] = 1
@@ -262,7 +270,12 @@ def extract_feature(window):
   ''' Center: '''
   ## 18. bool: does DL delay increase?
   try:
-    delay_diff = window['time_dl_pkt_delay_ue'][1:] - window['time_dl_pkt_delay_ue'][:-1]
+    delay_wind = np.copy(window['time_dl_pkt_delay_ue'])
+    delay_wind_res = np.zeros([int(delay_wind.shape[0]/10)])
+    for o_id in range(delay_wind_res.shape[0]-1):
+      delay_wind_res[o_id] = np.mean(delay_wind[o_id*10:o_id*10+10])
+    delay_diff = delay_wind_res[1:] - \
+      delay_wind_res[:-1]
     for i in range(delay_diff.shape[0]):
       if (delay_diff[i] > 0 and np.max(window['time_dl_pkt_delay_ue']) > 0.08) :
         feature[18] = 1
@@ -272,7 +285,12 @@ def extract_feature(window):
 
   ## 19. bool: does UL delay increase?
   try:
-    delay_diff = window['time_ul_pkt_delay_ue'][1:] - window['time_ul_pkt_delay_ue'][:-1]
+    delay_wind = np.copy(window['time_ul_pkt_delay_ue'])
+    delay_wind_res = np.zeros([int(delay_wind.shape[0]/10)])
+    for o_id in range(delay_wind_res.shape[0]-1):
+      delay_wind_res[o_id] = np.mean(delay_wind[o_id*10:o_id*10+10])
+    delay_diff = delay_wind_res[1:] - \
+      delay_wind_res[:-1]
     for i in range(delay_diff.shape[0]):
       if (delay_diff[i] > 0 and np.max(window['time_ul_pkt_delay_ue']) > 0.08) :
         feature[19] = 1
@@ -314,43 +332,70 @@ def extract_feature(window):
 
   ## 23. bool: does UL app bitrate > UL rate?
   diff = window['time_ul_pkt'] - window['time_ul_tbs']
-  if (np.sum(diff[diff > 0]) > 0.9 * np.sum(abs(diff[diff<0]))):
+  if (np.sum(diff > 0) > 0.1 * window['time_ul_pkt'].shape[0]):
     feature[23] = 1
 
   ## 24. bool: does DL app bitrate > DL rate?
   diff = window['time_dl_pkt'] - window['time_dl_tbs']
-  if (np.sum(diff[diff > 0]) > 0.9 * np.sum(abs(diff[diff<0]))):
+  if (np.sum(diff > 0) > 0.1 * window['time_dl_pkt'].shape[0]):
     feature[24] = 1
 
   ## 25. bool: are there other DL UE traffic?
+  ct_thres = 0.2
   dl_prb_interest = window['time_dl_prb_interest']
   dl_prb_others = window['time_dl_prb_others']
-  if (np.sum(dl_prb_others) / np.sum(dl_prb_interest) > 0.2):
-    feature[25] = 1
+  dl_prb_interest = np.append(dl_prb_interest, [0])
+  dl_prb_others = np.append(dl_prb_others, [0])
+  if (np.max(dl_prb_interest) + np.max(dl_prb_others) > 0.8*max_prb):
+    if (np.sum(dl_prb_others) / (np.sum(dl_prb_interest)+np.sum(dl_prb_others)) > ct_thres):
+      feature[25] = 1
 
   ## 26. bool: are there other UL UE traffic?
   dl_prb_interest = window['time_ul_prb_interest']
   dl_prb_others = window['time_ul_prb_others']
-  if (np.sum(dl_prb_others) / np.sum(dl_prb_interest) > 0.2):
-    feature[26] = 1
+  dl_prb_interest = np.append(dl_prb_interest, [0])
+  dl_prb_others = np.append(dl_prb_others, [0])
+  if (np.max(dl_prb_interest) + np.max(dl_prb_others) > 0.8*max_prb):
+    if (np.sum(dl_prb_others) / (np.sum(dl_prb_interest)+np.sum(dl_prb_others)) > ct_thres):
+      feature[26] = 1
 
+  channel_thres = 10
   ## 27. bool: is the UL channel bad?
   ul_mcs_50 = window['time_ul_50mcs']
+  # means = np.zeros([5])
+  # split_size = int(len(ul_mcs_50) / 5)
+  # for i in range(5):
+  #   means[i] = np.mean(ul_mcs_50[split_size*i:split_size*(i+1)])
+  # for i in range(4):
+  #   for j in range(i+1, 5):
+  #     if (means[i] - means[j]) > channel_thres:
+  #       feature[27] = 1
+  #       break
+
   counter = 0
   for i in ul_mcs_50:
-    if (i < 10):
+    if (i < channel_thres):
       counter += 1
-    if (counter > 5):
+    if (counter > 10 and np.max(window['time_ul_90mcs']) < 20):
       feature[27] = 1
       break
 
   ## 28. bool: is the DL channel bad? 
   dl_mcs_50 = window['time_dl_50mcs']
+  # means = np.zeros([5])
+  # split_size = int(len(dl_mcs_50) / 5)
+  # for i in range(5):
+  #   means[i] = np.mean(dl_mcs_50[split_size*i:split_size*(i+1)])
+  # for i in range(4):
+  #   for j in range(i+1, 5):
+  #     if (means[i] - means[j]) > channel_thres:
+  #       feature[28] = 1
+  #       break
   counter = 0
   for i in dl_mcs_50:
-    if (i < 10):
+    if (i < channel_thres):
       counter += 1
-    if (counter > 5):
+    if (counter > 10 and np.max(window['time_dl_90mcs']) < 20):
       feature[28] = 1
       break
 
@@ -361,9 +406,8 @@ def extract_feature(window):
   ul_harq = window['time_ul_rtx']
   counter = 0
   for i in ul_harq:
-    if (i > 3):
-      counter += 1
-    if (counter > 10):
+    counter += 1
+    if (counter > 20):
       feature[30] = 1
       break
 
@@ -371,9 +415,8 @@ def extract_feature(window):
   dl_harq = window['time_dl_rtx']
   counter = 0
   for i in dl_harq:
-    if (i > 3):
-      counter += 1
-    if (counter > 10):
+    counter += 1
+    if (counter > 20):
       feature[31] = 1
       break
 

@@ -1,0 +1,36 @@
+rrc_state_change --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+dl_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+dl_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+dl_harq_retx --> forward_delay_up --> local_jitter_buffer_drain --> local_inbound_fps_down
+rrc_state_change --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+ul_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+ul_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+ul_harq_retx --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+ul_scheduling_delay --> reverse_delay_up --> remote_jitter_buffer_drain --> remote_inbound_fps_down
+rrc_state_change --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+dl_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+dl_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+dl_harq_retx --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+rrc_state_change --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+ul_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+ul_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+ul_harq_retx --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+ul_scheduling_delay --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> local_pushback_drop
+rrc_state_change --> reverse_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> local_pushback_drop
+ul_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> local_pushback_drop
+ul_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> local_pushback_drop
+ul_harq_retx --> reverse_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> local_pushback_drop
+ul_scheduling_delay --> reverse_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> local_pushback_drop
+rrc_state_change --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+ul_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+ul_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+ul_harq_retx --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+ul_scheduling_delay --> reverse_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+rrc_state_change --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+dl_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+dl_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+dl_harq_retx --> forward_delay_up --> ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate --> remote_pushback_drop
+rrc_state_change --> forward_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> remote_target_bitrate_drop
+dl_channel_bad --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> remote_target_bitrate_drop
+dl_cross_traffic --> ul_app_bitrate_over_phy_bitrate or dl_app_bitrate_over_phy_bitrate --> forward_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> remote_target_bitrate_drop
+dl_harq_retx --> forward_delay_up --> not (ul_pushback_mismatch_target_bitrate or dl_pushback_mismatch_target_bitrate) --> remote_target_bitrate_drop

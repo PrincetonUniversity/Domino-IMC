@@ -54,16 +54,26 @@ def build_tree(chains):
 
 def expr_to_condition(expr):
     """Convert 'A or B' to 'context.get("A") or context.get("B")'."""
-    expr = expr.replace(" and ", "&&").replace(" or ", "||")
+    # print(expr)
+    expr = expr.replace(" and ", " && ").replace(" or ", " || ") \
+        .replace("not ", "! ").replace("(", "( ").replace(")", " )")
     tokens = expr.split()
+    # print(tokens)
     new_tokens = []
     for token in tokens:
         if token == '&&':
             new_tokens.append('and')
         elif token == '||':
             new_tokens.append('or')
+        elif token == '!':
+            new_tokens.append('not')
+        elif token == '(':
+            new_tokens.append('(')
+        elif token == ')':
+            new_tokens.append(')')
         else:
-            new_tokens.append(f"features[{text_to_feature_idx[token]}] == 1")
+            new_tokens.append(f"features[{text_to_feature_idx[token]}] == 1") 
+            # == 1 here can be removed for simpler code format
     return ' '.join(new_tokens)
 
 def generate_code(tree, indent=1):
@@ -109,9 +119,13 @@ def write_function_to_file(tree, filename="decision_tree_generated.py", func_nam
     print(f"✅ Function written to: {filename}")
 
 def main():
-    chains = read_chains("input.txt")  # Your causal chains go here
+    chains = read_chains("input_final.txt")  # Your causal chains go here
     tree = build_tree(chains)
-    write_function_to_file(tree, filename="generated_chain_search.py")
+    write_function_to_file(tree, filename="generated_chain_search_final.py")
+
+    # chains = read_chains("input_demo.txt")  # Your causal chains go here
+    # tree = build_tree(chains)
+    # write_function_to_file(tree, filename="generated_chain_search_demo.py")
 
 if __name__ == "__main__":
     main()
